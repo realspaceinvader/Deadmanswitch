@@ -1,22 +1,5 @@
 <?php
-/**
- * Dead Man's Switch - Single File Edition
- *
- * Features
- * - Single PHP file, no database
- * - Setup wizard
- * - Admin login with password hash
- * - PIN-protected check-in link
- * - Rolling interval: every check-in resets due time from NOW
- * - 20% remaining reminder mail to separate reminder address
- * - One missed interval triggers DMS mail dispatch
- * - Editable DMS subject/message/recipients after setup
- * - Editable welcome subject/message after setup
- * - Welcome mail on installation to all recipients + reminder address
- * - SMTP support (raw SMTP) with mail() fallback
- * - CSRF, secure session settings, basic rate limiting
- * - Web cron and CLI cron with clear status output
- */
+// Deadmanswitch Version 3.0 by spaceinvader.at
 
 declare(strict_types=1);
 error_reporting(E_ALL);
@@ -24,13 +7,14 @@ ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 date_default_timezone_set(date_default_timezone_get() ?: 'UTC');
 
+const APP_NAME = 'Deadmanswitch';
+const APP_VERSION = '3.1';
 const SESSION_TTL_SECONDS = 86400;
 const CHECKIN_SESSION_TTL_SECONDS = 259200;
 const SESSION_COOKIE_TTL_SECONDS = CHECKIN_SESSION_TTL_SECONDS;
 const PIN_MAX_FAILURES = 5;
 const RATE_LIMIT_BLOCK_SECONDS = 900;
 
-// -------------------- Session / security --------------------
 ini_set('session.use_only_cookies', '1');
 ini_set('session.use_strict_mode', '1');
 ini_set('session.cookie_lifetime', (string)SESSION_COOKIE_TTL_SECONDS);
@@ -42,7 +26,6 @@ session_set_cookie_params([
     'domain' => '',
     'secure' => true,
     'httponly' => true,
-    // Firefox Mobile can drop Strict cookies on direct reopen/top-level navigation to /checkin.
     'samesite' => 'Lax',
 ]);
 session_start();
@@ -52,7 +35,6 @@ if (!extension_loaded('openssl')) {
     die('OpenSSL extension is required.');
 }
 
-// -------------------- Paths --------------------
 define('LEGACY_DATA_DIR', __DIR__ . '/data');
 define('ALT_DATA_DIR', dirname(__DIR__) . '/dms_data');
 define('DATA_DIR', LEGACY_DATA_DIR);
@@ -65,7 +47,6 @@ define('HTACCESS_FILE', DATA_DIR . '/.htaccess');
 
 bootstrap_files();
 
-// -------------------- Helpers --------------------
 function bootstrap_files(): void
 {
     if (!is_dir(DATA_DIR) && is_dir(ALT_DATA_DIR)) {
@@ -243,6 +224,462 @@ function session_user_agent_matches(?string $fingerprint): bool
 function h(?string $s): string
 {
     return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function translations(): array
+{
+    return [
+        'de' => [
+            'nav_dashboard' => 'Dashboard',
+            'tab_intervals' => 'Intervalle &amp; Links',
+            'tab_messages' => 'Nachrichten',
+            'tab_mail' => 'Mailversand',
+            'tab_system' => 'System',
+            'tab_logs' => 'Logs',
+            'aria_dashboard_areas' => 'Dashboard Bereiche',
+            'btn_logout' => 'Logout',
+            'heading_system_status' => 'System Status',
+            'field_last_checkin' => 'Letzter Check-in',
+            'field_next_due' => 'Nächste Fälligkeit',
+            'field_interval' => 'Intervall',
+            'field_remaining_time' => 'Restzeit',
+            'field_reminder_threshold' => 'Reminder ab ~20% Restzeit',
+            'badge_already_sent' => 'bereits gesendet',
+            'field_alarm_triggered' => 'Alarm ausgelöst',
+            'status_triggered_yes' => 'JA - Mails versendet!',
+            'status_triggered_no' => 'NEIN - Alles okay',
+            'triggered_at_template' => ' am {{date}}',
+            'stats_success_fail_template' => 'Erfolgreich: {{ok}} | Fehlgeschlagen: {{fail}}',
+            'heading_current_time' => 'Aktuelle Zeit',
+            'label_current_local_time' => 'Aktuelle lokale Zeit',
+            'heading_checkin_link' => 'Dein Check-in Link',
+            'desc_checkin_link' => 'Speichere diesen Link auf deinem Smartphone. Beim Öffnen wird deine 4-stellige PIN abgefragt. Jeder Klick startet das Intervall neu ab genau diesem Moment.',
+            'btn_goto_link_test' => 'Gehe zum Link (Test)',
+            'heading_cronjob' => 'Cronjob',
+            'desc_cronjob' => 'Richte diesen Link in einem Web-Cron-Dienst ein, ideal jede Minute oder alle 5 Minuten.',
+            'btn_cron_preview' => 'Cron-Status-Vorschau',
+            'btn_restart_interval' => 'Intervall jetzt neu starten',
+            'heading_change_interval' => 'Intervall ändern',
+            'label_days' => 'Tage',
+            'label_hours' => 'Stunden',
+            'label_minutes' => 'Minuten',
+            'note_interval_restart' => 'Beim Speichern startet das neue Intervall sofort neu.',
+            'btn_save_interval' => 'Intervall speichern',
+            'heading_edit_messages' => 'DMS / Adressen / Willkommensmail bearbeiten',
+            'label_recipients' => 'Empfänger (Vertrauenspersonen)',
+            'label_reminder_email' => 'Erinnerungs-Mailadresse',
+            'label_dms_subject' => 'DMS-Betreff',
+            'label_welcome_subject' => 'Willkommens-Betreff',
+            'label_dms_message' => 'DMS-Nachricht',
+            'label_welcome_body' => 'Willkommensmail Text',
+            'note_placeholders' => 'Platzhalter: {{installed_at}}, {{system_url}}, {{interval}}, {{reminder_email}}, {{recipient_email}}',
+            'btn_save_messages' => 'Nachrichten speichern',
+            'label_send_mode' => 'Versandmodus',
+            'label_smtp_secure' => 'Sicherheit',
+            'label_smtp_host' => 'SMTP Host',
+            'label_smtp_port' => 'SMTP Port',
+            'label_smtp_user' => 'SMTP Benutzer',
+            'label_smtp_pass' => 'SMTP Passwort',
+            'label_smtp_pass_setup' => 'SMTP Passwort / App-Passwort',
+            'placeholder_leave_empty_unchanged' => 'leer lassen = unverändert',
+            'label_sender_address' => 'Absenderadresse',
+            'btn_save_changes' => 'Änderungen speichern',
+            'btn_send_test_dms' => 'Test-DMS senden',
+            'btn_send_test_welcome' => 'Test-Willkommensmail senden',
+            'btn_send_test_reminder' => 'Test-Erinnerung senden',
+            'heading_appearance' => 'Darstellung',
+            'label_theme' => 'Theme',
+            'theme_light' => 'Lightmode',
+            'theme_dark' => 'Darkmode',
+            'theme_happy' => 'Happy Theme',
+            'theme_cat' => 'Cat Theme',
+            'btn_save_theme' => 'Theme speichern',
+            'heading_language' => 'Sprache',
+            'desc_language' => 'Sprache der gesamten Oberfläche und aller E-Mails.',
+            'lang_option_de' => 'Deutsch',
+            'lang_option_en' => 'English',
+            'btn_save_language' => 'Sprache speichern',
+            'heading_rate_limiter' => 'Rate-Limiter',
+            'desc_rate_limiter' => 'Diese Einstellung gilt für Admin-Login, PIN-Eingabe, Captcha-Fehler und die erneute Admin-Authentifizierung nach einer Sperre. Die Sperrdauer ist intern fest gesetzt.',
+            'label_max_failures' => 'Fehlversuche bis zur Sperre',
+            'btn_save_rate_limit' => 'Rate-Limiter speichern',
+            'heading_security' => 'Sicherheit',
+            'desc_security_card' => 'Hier kannst du das Admin-Passwort und die 4-stellige Check-in-PIN ändern. Zur Bestätigung ist immer das aktuelle Admin-Passwort erforderlich.',
+            'label_current_admin_password' => 'Aktuelles Admin-Passwort',
+            'label_new_admin_password' => 'Neues Admin-Passwort',
+            'label_new_admin_password_confirm' => 'Neues Admin-Passwort bestätigen',
+            'placeholder_min_12_chars' => 'mindestens 12 Zeichen',
+            'label_new_pin' => 'Neue Check-in PIN',
+            'label_new_pin_confirm' => 'Neue PIN bestätigen',
+            'btn_save_security' => 'Sicherheitsdaten speichern',
+            'heading_system_actions' => 'System-Aktionen',
+            'btn_reset_system' => 'System zurücksetzen',
+            'confirm_reset_system' => 'Wirklich alles löschen?',
+            'heading_logs' => 'Logs',
+            'desc_logs' => 'Anzeige der letzten Einträge aus der events.log.',
+            'label_filter' => 'Filter',
+            'placeholder_search_logs' => 'Logs durchsuchen',
+            'label_refresh_logs' => 'Logs aktualisieren',
+            'btn_clear_logs' => 'Logs löschen',
+            'confirm_clear_logs' => 'Wirklich alle Logs löschen?',
+            'log_filter_all' => 'Alle',
+            'log_filter_rate_limiter' => 'Rate-Limiter',
+            'log_filter_checkin' => 'Check-in',
+            'log_filter_security' => 'Sicherheit',
+            'log_filter_system' => 'System',
+            'log_filter_mail' => 'Mail',
+            'log_filter_alarm' => 'Alarm/DMS',
+            'setup_page_title' => 'Deadmanswitch - Ersteinrichtung',
+            'setup_intro' => 'Das System wird in einem hellen, klar strukturierten Setup eingerichtet. Alle Eingaben bleiben funktional unverändert, damit die Auslieferung und Check-ins danach wie gewohnt laufen.',
+            'setup_step1_title' => '1. Sicherheit',
+            'label_admin_password' => 'Admin-Passwort',
+            'label_checkin_pin' => 'Check-in PIN (4-stellig)',
+            'setup_password_note' => 'Das Admin-Passwort muss mindestens 12 Zeichen sowie Gross-/Kleinbuchstaben, Zahl und Sonderzeichen enthalten.',
+            'setup_step2_title' => '2. Intervall',
+            'setup_interval_note' => 'Jeder Check-in startet dieses Intervall neu ab genau dem Klick-Zeitpunkt.',
+            'setup_step3_title' => '3. Adressen und Inhalte',
+            'label_recipients_setup' => 'Vertrauenspersonen / Empfänger (Komma oder Zeilenumbruch getrennt)',
+            'label_reminder_email_setup' => 'Erinnerungs-Mailadresse (bekommt bei ca. 20% Restzeit die Erinnerung)',
+            'setup_step4_title' => '4. Mailversand',
+            'btn_finish_setup' => 'Setup abschließen',
+            'btn_login' => 'Einloggen',
+            'checkin_success_title' => 'Check-in erfolgreich',
+            'checkin_next_due_label' => 'Nächste Fälligkeit:',
+            'btn_admin_login' => 'Admin-Login',
+            'btn_confirm' => 'Bestätigen',
+            'err_password_length' => '{{label}} muss mindestens 12 Zeichen lang sein.',
+            'err_password_complexity' => '{{label}} muss Gross-/Kleinbuchstaben, Zahl und Sonderzeichen enthalten.',
+            'field_admin_password_label' => 'Admin-Passwort',
+            'field_new_admin_password_label' => 'Neues Admin-Passwort',
+            'err_pin_digits' => 'PIN muss genau 4 Ziffern haben.',
+            'err_interval_min' => 'Intervall mindestens 1 Minute.',
+            'err_recipients_required' => 'Mindestens eine gültige Empfängeradresse erforderlich.',
+            'err_reminder_email_required' => 'Gültige Erinnerungs-Mailadresse erforderlich.',
+            'err_dms_fields_required' => 'DMS-Betreff und Nachricht sind erforderlich.',
+            'err_welcome_fields_required' => 'Willkommens-Betreff und -Text sind erforderlich.',
+            'err_setup_save_failed' => 'Setup konnte nicht gespeichert werden.',
+            'err_config_not_found_after_write' => 'Konfigurationsdatei wurde nach dem Schreiben nicht gefunden.',
+            'setup_notice_template' => 'Setup abgeschlossen. Willkommensmails erfolgreich: {{ok}}, fehlgeschlagen: {{fail}}.',
+            'err_smtp_mode_invalid' => 'Ungültiger Versandmodus.',
+            'err_smtp_secure_invalid' => 'Ungültiger SMTP-Sicherheitsmodus.',
+            'err_sender_invalid' => 'Absenderadresse ist ungültig.',
+            'err_smtp_host_invalid' => 'SMTP-Host ist ungültig.',
+            'err_smtp_port_invalid' => 'SMTP-Port ist ungültig.',
+            'err_smtp_user_invalid' => 'SMTP-Benutzer muss eine gültige E-Mail-Adresse sein.',
+            'err_smtp_pass_missing' => 'SMTP-Passwort fehlt.',
+            'err_unauthorized_logged' => 'Unberechtigter Zugriffsversuch wurde protokolliert und der Admin per E-Mail informiert.',
+            'err_reauth_required' => 'Zusätzliche Authentifizierung erforderlich.',
+            'err_pin_locked' => 'PIN-Eingabe gesperrt. Bitte erneut mit dem Admin-Passwort authentifizieren.',
+            'unit_second' => 'Sekunde',
+            'unit_seconds' => 'Sekunden',
+            'err_failed_wait' => 'Fehlgeschlagen. Bitte {{seconds}} {{unit}} warten.',
+            'flash_interval_restarted' => 'Intervall manuell neu gestartet.',
+            'flash_interval_saved' => 'Intervall gespeichert und neu gestartet.',
+            'flash_theme_saved' => 'Theme gespeichert.',
+            'flash_language_saved' => 'Sprache gespeichert.',
+            'flash_rate_limit_saved' => 'Rate-Limiter-Einstellungen gespeichert.',
+            'err_current_password_wrong' => 'Aktuelles Admin-Passwort ist falsch.',
+            'err_need_new_password_or_pin' => 'Bitte gib ein neues Admin-Passwort und/oder eine neue PIN ein.',
+            'err_password_confirm_mismatch' => 'Die Bestätigung des neuen Admin-Passworts stimmt nicht überein.',
+            'err_new_pin_digits' => 'Die neue PIN muss genau 4 Ziffern haben.',
+            'err_pin_confirm_mismatch' => 'Die Bestätigung der neuen PIN stimmt nicht überein.',
+            'field_admin_password_short' => 'Admin-Passwort',
+            'field_pin_short' => 'PIN',
+            'word_and' => ' und ',
+            'flash_credentials_updated_template' => '{{items}} erfolgreich aktualisiert.',
+            'flash_payload_saved' => 'Adressen, DMS-Nachricht, Willkommensmail und Mailversand gespeichert.',
+            'flash_mail_settings_saved' => 'Mailversand gespeichert.',
+            'flash_test_dms_template' => 'Test-DMS: erfolgreich {{ok}}, fehlgeschlagen {{fail}}',
+            'flash_test_welcome_template' => 'Willkommensmail-Test: erfolgreich {{ok}}, fehlgeschlagen {{fail}}',
+            'err_no_reminder_email' => 'Keine gültige Erinnerungs-Mailadresse gespeichert.',
+            'flash_test_reminder_sent' => 'Test-Erinnerung gesendet.',
+            'err_prefix' => 'Fehler: ',
+            'flash_logs_cleared' => 'Logs wurden gelöscht.',
+            'err_logs_clear_failed_template' => 'Logs konnten nicht gelöscht werden: {{error}}',
+            'diag_heading' => 'Systemdiagnose',
+            'diag_active_data_dir' => 'Aktives Datenverzeichnis:',
+            'diag_alt_data_dir' => 'Alternatives Datenverzeichnis:',
+            'diag_data_dir_exists' => 'Datenverzeichnis vorhanden:',
+            'diag_data_dir_readable' => 'Datenverzeichnis lesbar:',
+            'diag_data_dir_writable' => 'Datenverzeichnis schreibbar:',
+            'diag_config_exists' => 'Config vorhanden:',
+            'diag_key_exists' => 'Key vorhanden:',
+            'diag_note_prefix' => 'Hinweis:',
+            'word_yes' => 'ja',
+            'word_no' => 'nein',
+            'cron_now' => 'Jetzt: ',
+            'cron_next_due' => 'Nächste Fälligkeit: ',
+            'cron_remaining_seconds' => 'Restsekunden: ',
+            'cron_already_triggered' => 'Alarm bereits ausgelöst.',
+            'cron_triggered_at' => 'Ausgelöst am: ',
+            'cron_successful_deliveries' => 'Erfolgreiche Zustellungen: ',
+            'cron_failed_deliveries' => 'Fehlgeschlagene Zustellungen: ',
+            'cron_reminder_sent' => 'Erinnerung gesendet.',
+            'cron_reminder_failed' => 'Erinnerung fehlgeschlagen: ',
+            'cron_alarm_triggered' => 'Alarm ausgelöst. Nachrichten wurden versendet.',
+            'cron_fail_prefix' => 'FEHLER ',
+            'cron_would_trigger' => 'Alarm würde jetzt auslösen.',
+            'cron_all_good' => 'Alles gut.',
+            'cron_setup_incomplete_interval' => 'Setup unvollständig: ungültiges Intervall.',
+            'cron_config_broken' => 'Konfiguration defekt: verschlüsselte Nutzdaten nicht lesbar.',
+            'cron_setup_incomplete' => 'Setup unvollständig.',
+            'cron_invalid_token' => 'Ungültiges Cron-Token.',
+            'default_welcome_subject' => 'Du wurdest als Vertrauensperson hinterlegt',
+            'default_welcome_body' => "Hallo,\n\ndiese E-Mail informiert dich darüber, dass deine Adresse in einem Deadmanswitch als Vertrauensperson oder Benachrichtigungsadresse hinterlegt wurde.\n\nSystem-URL: {{system_url}}\nInstalliert am: {{installed_at}}\nCheck-in-Intervall: {{interval}}\nErinnerungsadresse: {{reminder_email}}\n\nDas bedeutet nicht, dass jetzt etwas passiert ist. Diese Mail dient nur zur Information.\n",
+            'default_dms_subject' => 'Deadmanswitch Nachricht',
+            'default_dms_message' => "Diese Nachricht wurde automatisch ausgelöst, weil das Check-in-Intervall verpasst wurde.\n",
+            'lockout_subject' => 'Sicherheitswarnung: Admin-Login gesperrt',
+            'lockout_body_intro' => 'Ein unberechtigter Zugriffsversuch wurde erkannt.',
+            'lockout_time_label' => 'Zeit: ',
+            'lockout_ip_label' => 'IP: ',
+            'lockout_system_label' => 'System: ',
+            'lockout_body_outro' => 'Der Admin-Login wurde wegen zu vieler Fehlversuche vorübergehend gesperrt.',
+            'reminder_subject' => 'Erinnerung: Deadmanswitch Check-in bald fällig',
+            'reminder_body_intro' => 'Dies ist eine automatische Erinnerung.',
+            'reminder_body_action' => 'Bitte führe bald deinen Deadmanswitch Check-in aus.',
+            'reminder_next_due_label' => 'Nächste Fälligkeit: ',
+            'reminder_remaining_label' => 'Restzeit: ',
+            'reminder_link_label' => 'Check-in-Link: ',
+            'test_reminder_subject' => '[TEST] Erinnerung: Deadmanswitch Check-in',
+            'test_reminder_body_intro' => 'Dies ist eine Test-Erinnerung.',
+            'test_dms_prefix' => 'Dies ist ein Testversand.',
+        ],
+        'en' => [
+            'nav_dashboard' => 'Dashboard',
+            'tab_intervals' => 'Intervals &amp; Links',
+            'tab_messages' => 'Messages',
+            'tab_mail' => 'Mail Delivery',
+            'tab_system' => 'System',
+            'tab_logs' => 'Logs',
+            'aria_dashboard_areas' => 'Dashboard sections',
+            'btn_logout' => 'Logout',
+            'heading_system_status' => 'System Status',
+            'field_last_checkin' => 'Last check-in',
+            'field_next_due' => 'Next due',
+            'field_interval' => 'Interval',
+            'field_remaining_time' => 'Remaining time',
+            'field_reminder_threshold' => 'Reminder at ~20% remaining time',
+            'badge_already_sent' => 'already sent',
+            'field_alarm_triggered' => 'Alarm triggered',
+            'status_triggered_yes' => 'YES - Messages sent!',
+            'status_triggered_no' => 'NO - All good',
+            'triggered_at_template' => ' on {{date}}',
+            'stats_success_fail_template' => 'Successful: {{ok}} | Failed: {{fail}}',
+            'heading_current_time' => 'Current Time',
+            'label_current_local_time' => 'Current local time',
+            'heading_checkin_link' => 'Your Check-in Link',
+            'desc_checkin_link' => 'Save this link on your smartphone. Opening it will ask for your 4-digit PIN. Every click restarts the interval from that exact moment.',
+            'btn_goto_link_test' => 'Open Link (Test)',
+            'heading_cronjob' => 'Cron Job',
+            'desc_cronjob' => 'Set up this link in a web cron service, ideally every minute or every 5 minutes.',
+            'btn_cron_preview' => 'Cron Status Preview',
+            'btn_restart_interval' => 'Restart interval now',
+            'heading_change_interval' => 'Change Interval',
+            'label_days' => 'Days',
+            'label_hours' => 'Hours',
+            'label_minutes' => 'Minutes',
+            'note_interval_restart' => 'Saving restarts the new interval immediately.',
+            'btn_save_interval' => 'Save Interval',
+            'heading_edit_messages' => 'Edit DMS / Addresses / Welcome Mail',
+            'label_recipients' => 'Recipients (Trusted Contacts)',
+            'label_reminder_email' => 'Reminder Email Address',
+            'label_dms_subject' => 'DMS Subject',
+            'label_welcome_subject' => 'Welcome Subject',
+            'label_dms_message' => 'DMS Message',
+            'label_welcome_body' => 'Welcome Mail Text',
+            'note_placeholders' => 'Placeholders: {{installed_at}}, {{system_url}}, {{interval}}, {{reminder_email}}, {{recipient_email}}',
+            'btn_save_messages' => 'Save Messages',
+            'label_send_mode' => 'Delivery Mode',
+            'label_smtp_secure' => 'Security',
+            'label_smtp_host' => 'SMTP Host',
+            'label_smtp_port' => 'SMTP Port',
+            'label_smtp_user' => 'SMTP User',
+            'label_smtp_pass' => 'SMTP Password',
+            'label_smtp_pass_setup' => 'SMTP Password / App Password',
+            'placeholder_leave_empty_unchanged' => 'leave empty = unchanged',
+            'label_sender_address' => 'Sender Address',
+            'btn_save_changes' => 'Save Changes',
+            'btn_send_test_dms' => 'Send Test DMS',
+            'btn_send_test_welcome' => 'Send Test Welcome Mail',
+            'btn_send_test_reminder' => 'Send Test Reminder',
+            'heading_appearance' => 'Appearance',
+            'label_theme' => 'Theme',
+            'theme_light' => 'Light Mode',
+            'theme_dark' => 'Dark Mode',
+            'theme_happy' => 'Happy Theme',
+            'theme_cat' => 'Cat Theme',
+            'btn_save_theme' => 'Save Theme',
+            'heading_language' => 'Language',
+            'desc_language' => 'Language for the entire interface and all emails.',
+            'lang_option_de' => 'German',
+            'lang_option_en' => 'English',
+            'btn_save_language' => 'Save Language',
+            'heading_rate_limiter' => 'Rate Limiter',
+            'desc_rate_limiter' => 'This setting applies to admin login, PIN entry, captcha failures, and re-authentication after a lockout. The lockout duration is fixed internally.',
+            'label_max_failures' => 'Failed attempts until lockout',
+            'btn_save_rate_limit' => 'Save Rate Limiter',
+            'heading_security' => 'Security',
+            'desc_security_card' => 'Here you can change the admin password and the 4-digit check-in PIN. Confirmation always requires the current admin password.',
+            'label_current_admin_password' => 'Current Admin Password',
+            'label_new_admin_password' => 'New Admin Password',
+            'label_new_admin_password_confirm' => 'Confirm New Admin Password',
+            'placeholder_min_12_chars' => 'at least 12 characters',
+            'label_new_pin' => 'New Check-in PIN',
+            'label_new_pin_confirm' => 'Confirm New PIN',
+            'btn_save_security' => 'Save Security Settings',
+            'heading_system_actions' => 'System Actions',
+            'btn_reset_system' => 'Reset System',
+            'confirm_reset_system' => 'Really delete everything?',
+            'heading_logs' => 'Logs',
+            'desc_logs' => 'Displays the most recent entries from events.log.',
+            'label_filter' => 'Filter',
+            'placeholder_search_logs' => 'Search logs',
+            'label_refresh_logs' => 'Refresh logs',
+            'btn_clear_logs' => 'Clear Logs',
+            'confirm_clear_logs' => 'Really delete all logs?',
+            'log_filter_all' => 'All',
+            'log_filter_rate_limiter' => 'Rate Limiter',
+            'log_filter_checkin' => 'Check-in',
+            'log_filter_security' => 'Security',
+            'log_filter_system' => 'System',
+            'log_filter_mail' => 'Mail',
+            'log_filter_alarm' => 'Alarm/DMS',
+            'setup_page_title' => 'Deadmanswitch - Initial Setup',
+            'setup_intro' => 'The system is set up with a clear, guided wizard. All inputs remain functionally unchanged so delivery and check-ins work as expected afterwards.',
+            'setup_step1_title' => '1. Security',
+            'label_admin_password' => 'Admin Password',
+            'label_checkin_pin' => 'Check-in PIN (4 digits)',
+            'setup_password_note' => 'The admin password must be at least 12 characters and contain upper/lowercase letters, a digit, and a special character.',
+            'setup_step2_title' => '2. Interval',
+            'setup_interval_note' => 'Every check-in restarts this interval from the exact moment of the click.',
+            'setup_step3_title' => '3. Addresses and Content',
+            'label_recipients_setup' => 'Trusted Contacts / Recipients (comma or newline separated)',
+            'label_reminder_email_setup' => 'Reminder Email Address (receives the reminder at ~20% remaining time)',
+            'setup_step4_title' => '4. Mail Delivery',
+            'btn_finish_setup' => 'Finish Setup',
+            'btn_login' => 'Log In',
+            'checkin_success_title' => 'Check-in Successful',
+            'checkin_next_due_label' => 'Next due:',
+            'btn_admin_login' => 'Admin Login',
+            'btn_confirm' => 'Confirm',
+            'err_password_length' => '{{label}} must be at least 12 characters long.',
+            'err_password_complexity' => '{{label}} must contain upper/lowercase letters, a digit, and a special character.',
+            'field_admin_password_label' => 'Admin password',
+            'field_new_admin_password_label' => 'New admin password',
+            'err_pin_digits' => 'PIN must be exactly 4 digits.',
+            'err_interval_min' => 'Interval must be at least 1 minute.',
+            'err_recipients_required' => 'At least one valid recipient address is required.',
+            'err_reminder_email_required' => 'A valid reminder email address is required.',
+            'err_dms_fields_required' => 'DMS subject and message are required.',
+            'err_welcome_fields_required' => 'Welcome subject and text are required.',
+            'err_setup_save_failed' => 'Setup could not be saved.',
+            'err_config_not_found_after_write' => 'Configuration file was not found after writing.',
+            'setup_notice_template' => 'Setup completed. Welcome mails successful: {{ok}}, failed: {{fail}}.',
+            'err_smtp_mode_invalid' => 'Invalid delivery mode.',
+            'err_smtp_secure_invalid' => 'Invalid SMTP security mode.',
+            'err_sender_invalid' => 'Sender address is invalid.',
+            'err_smtp_host_invalid' => 'SMTP host is invalid.',
+            'err_smtp_port_invalid' => 'SMTP port is invalid.',
+            'err_smtp_user_invalid' => 'SMTP user must be a valid email address.',
+            'err_smtp_pass_missing' => 'SMTP password is missing.',
+            'err_unauthorized_logged' => 'Unauthorized access attempt has been logged and the admin has been notified by email.',
+            'err_reauth_required' => 'Additional authentication required.',
+            'err_pin_locked' => 'PIN entry locked. Please re-authenticate with the admin password.',
+            'unit_second' => 'second',
+            'unit_seconds' => 'seconds',
+            'err_failed_wait' => 'Failed. Please wait {{seconds}} {{unit}}.',
+            'flash_interval_restarted' => 'Interval manually restarted.',
+            'flash_interval_saved' => 'Interval saved and restarted.',
+            'flash_theme_saved' => 'Theme saved.',
+            'flash_language_saved' => 'Language saved.',
+            'flash_rate_limit_saved' => 'Rate limiter settings saved.',
+            'err_current_password_wrong' => 'Current admin password is incorrect.',
+            'err_need_new_password_or_pin' => 'Please enter a new admin password and/or a new PIN.',
+            'err_password_confirm_mismatch' => 'The confirmation of the new admin password does not match.',
+            'err_new_pin_digits' => 'The new PIN must be exactly 4 digits.',
+            'err_pin_confirm_mismatch' => 'The confirmation of the new PIN does not match.',
+            'field_admin_password_short' => 'Admin password',
+            'field_pin_short' => 'PIN',
+            'word_and' => ' and ',
+            'flash_credentials_updated_template' => '{{items}} updated successfully.',
+            'flash_payload_saved' => 'Recipients, DMS message, welcome mail, and mail delivery saved.',
+            'flash_mail_settings_saved' => 'Mail delivery saved.',
+            'flash_test_dms_template' => 'Test DMS: successful {{ok}}, failed {{fail}}',
+            'flash_test_welcome_template' => 'Welcome mail test: successful {{ok}}, failed {{fail}}',
+            'err_no_reminder_email' => 'No valid reminder email address saved.',
+            'flash_test_reminder_sent' => 'Test reminder sent.',
+            'err_prefix' => 'Error: ',
+            'flash_logs_cleared' => 'Logs have been cleared.',
+            'err_logs_clear_failed_template' => 'Logs could not be cleared: {{error}}',
+            'diag_heading' => 'System Diagnostics',
+            'diag_active_data_dir' => 'Active data directory:',
+            'diag_alt_data_dir' => 'Alternative data directory:',
+            'diag_data_dir_exists' => 'Data directory exists:',
+            'diag_data_dir_readable' => 'Data directory readable:',
+            'diag_data_dir_writable' => 'Data directory writable:',
+            'diag_config_exists' => 'Config present:',
+            'diag_key_exists' => 'Key present:',
+            'diag_note_prefix' => 'Note:',
+            'word_yes' => 'yes',
+            'word_no' => 'no',
+            'cron_now' => 'Now: ',
+            'cron_next_due' => 'Next due: ',
+            'cron_remaining_seconds' => 'Remaining seconds: ',
+            'cron_already_triggered' => 'Alarm already triggered.',
+            'cron_triggered_at' => 'Triggered at: ',
+            'cron_successful_deliveries' => 'Successful deliveries: ',
+            'cron_failed_deliveries' => 'Failed deliveries: ',
+            'cron_reminder_sent' => 'Reminder sent.',
+            'cron_reminder_failed' => 'Reminder failed: ',
+            'cron_alarm_triggered' => 'Alarm triggered. Messages dispatched.',
+            'cron_fail_prefix' => 'FAIL ',
+            'cron_would_trigger' => 'Alarm would trigger now.',
+            'cron_all_good' => 'All good.',
+            'cron_setup_incomplete_interval' => 'Setup incomplete: invalid interval.',
+            'cron_config_broken' => 'Config broken: encrypted payload unreadable.',
+            'cron_setup_incomplete' => 'Setup incomplete.',
+            'cron_invalid_token' => 'Invalid cron token.',
+            'default_welcome_subject' => 'You have been registered as a trusted contact',
+            'default_welcome_body' => "Hello,\n\nThis email informs you that your address has been registered in a Deadmanswitch as a trusted contact or notification address.\n\nSystem URL: {{system_url}}\nInstalled on: {{installed_at}}\nCheck-in interval: {{interval}}\nReminder address: {{reminder_email}}\n\nThis does not mean anything has happened. This email is for informational purposes only.\n",
+            'default_dms_subject' => 'Deadmanswitch Message',
+            'default_dms_message' => "This message was triggered automatically because the check-in interval was missed.\n",
+            'lockout_subject' => 'Security Warning: Admin Login Locked',
+            'lockout_body_intro' => 'An unauthorized access attempt was detected.',
+            'lockout_time_label' => 'Time: ',
+            'lockout_ip_label' => 'IP: ',
+            'lockout_system_label' => 'System: ',
+            'lockout_body_outro' => 'The admin login has been temporarily locked due to too many failed attempts.',
+            'reminder_subject' => 'Reminder: Deadmanswitch check-in due soon',
+            'reminder_body_intro' => 'This is an automatic reminder.',
+            'reminder_body_action' => 'Please perform your Deadmanswitch check-in soon.',
+            'reminder_next_due_label' => 'Next due: ',
+            'reminder_remaining_label' => 'Remaining time: ',
+            'reminder_link_label' => 'Check-in link: ',
+            'test_reminder_subject' => '[TEST] Reminder: Deadmanswitch Check-in',
+            'test_reminder_body_intro' => 'This is a test reminder.',
+            'test_dms_prefix' => 'This is a test dispatch.',
+        ],
+    ];
+}
+
+function current_language(): string
+{
+    $config = $GLOBALS['dms_current_config'] ?? null;
+    $value = is_array($config) ? (string)($config['language'] ?? 'de') : 'de';
+    return in_array($value, ['de', 'en'], true) ? $value : 'de';
+}
+
+function set_current_language(?array $config): void
+{
+    $GLOBALS['dms_current_config'] = $config;
+}
+
+function t(string $key, array $vars = []): string
+{
+    $lang = current_language();
+    $table = translations();
+    $text = $table[$lang][$key] ?? $table['de'][$key] ?? $key;
+    return $vars ? strtr($text, $vars) : $text;
 }
 
 function normalize_ip_candidate(string $value): ?string
@@ -541,7 +978,8 @@ function failure_delay_seconds(int $attempt): int
 function delay_message(int $attempt): string
 {
     $seconds = failure_delay_seconds($attempt);
-    return 'Fehlgeschlagen. Bitte ' . $seconds . ' Sekunde' . ($seconds === 1 ? '' : 'n') . ' warten.';
+    $unit = $seconds === 1 ? t('unit_second') : t('unit_seconds');
+    return t('err_failed_wait', ['{{seconds}}' => (string)$seconds, '{{unit}}' => $unit]);
 }
 
 function refresh_session_cookie(int $ttlSeconds = SESSION_COOKIE_TTL_SECONDS): void
@@ -757,7 +1195,7 @@ function handle_admin_login_attempt(array $config, string $ip): array
     if (!login_allowed($ip)) {
         apply_failure_delay_for_attempt(rate_limit_max_failures($config));
         log_event('Admin login failure');
-        return ['success' => false, 'error' => 'Unberechtigter Zugriffsversuch wurde protokolliert und der Admin per E-Mail informiert.'];
+        return ['success' => false, 'error' => t('err_unauthorized_logged')];
     }
 
     require_csrf();
@@ -771,7 +1209,7 @@ function handle_admin_login_attempt(array $config, string $ip): array
             send_admin_lockout_notification($config, $ip);
             apply_failure_delay_for_attempt(rate_limit_max_failures($config));
             log_event('Admin login failure');
-            return ['success' => false, 'error' => 'Unberechtigter Zugriffsversuch wurde protokolliert und der Admin per E-Mail informiert.'];
+            return ['success' => false, 'error' => t('err_unauthorized_logged')];
         }
         apply_failure_delay_for_attempt($attempt);
         log_event('Admin login failure');
@@ -786,13 +1224,14 @@ function handle_admin_login_attempt(array $config, string $ip): array
     return ['success' => true, 'error' => ''];
 }
 
-function validate_admin_password(string $password): ?string
+function validate_admin_password(string $password, ?string $label = null): ?string
 {
+    $label = $label ?? t('field_admin_password_label');
     if (strlen($password) < 12) {
-        return 'Admin-Passwort muss mindestens 12 Zeichen lang sein.';
+        return t('err_password_length', ['{{label}}' => $label]);
     }
     if (!preg_match('/[a-z]/', $password) || !preg_match('/[A-Z]/', $password) || !preg_match('/\d/', $password) || !preg_match('/[^a-zA-Z0-9]/', $password)) {
-        return 'Admin-Passwort muss Gross-/Kleinbuchstaben, Zahl und Sonderzeichen enthalten.';
+        return t('err_password_complexity', ['{{label}}' => $label]);
     }
     return null;
 }
@@ -816,19 +1255,20 @@ function rate_limit_seconds(?array $config = null): int
 function rate_limit_wait_text(?array $config = null): string
 {
     $minutes = rate_limit_minutes($config);
-    return $minutes === 1 ? '1 Minute' : $minutes . ' Minuten';
+    $unit = $minutes === 1 ? t('label_minutes') : t('label_minutes');
+    return $minutes . ' ' . $unit;
 }
 
 function log_filter_options(): array
 {
     return [
-        'all' => 'Alle',
-        'rate_limiter' => 'Rate-Limiter',
-        'checkin' => 'Check-in',
-        'security' => 'Sicherheit',
-        'system' => 'System',
-        'mail' => 'Mail',
-        'alarm' => 'Alarm/DMS',
+        'all' => t('log_filter_all'),
+        'rate_limiter' => t('log_filter_rate_limiter'),
+        'checkin' => t('log_filter_checkin'),
+        'security' => t('log_filter_security'),
+        'system' => t('log_filter_system'),
+        'mail' => t('log_filter_mail'),
+        'alarm' => t('log_filter_alarm'),
     ];
 }
 
@@ -1140,26 +1580,26 @@ function validate_smtp_settings(string $mode, string $host, int $port, string $u
 {
     $errors = [];
     if (!in_array($mode, ['smtp', 'mail'], true)) {
-        $errors[] = 'Ungültiger Versandmodus.';
+        $errors[] = t('err_smtp_mode_invalid');
     }
     if (!in_array($secure, ['tls', 'ssl'], true)) {
-        $errors[] = 'Ungültiger SMTP-Sicherheitsmodus.';
+        $errors[] = t('err_smtp_secure_invalid');
     }
     if ($from !== '' && !filter_var($from, FILTER_VALIDATE_EMAIL)) {
-        $errors[] = 'Absenderadresse ist ungültig.';
+        $errors[] = t('err_sender_invalid');
     }
     if ($mode === 'smtp') {
         if ($host === '' || !preg_match('/^(?:[a-z0-9.-]+|\[[a-f0-9:]+\])$/i', $host)) {
-            $errors[] = 'SMTP-Host ist ungültig.';
+            $errors[] = t('err_smtp_host_invalid');
         }
         if ($port < 1 || $port > 65535) {
-            $errors[] = 'SMTP-Port ist ungültig.';
+            $errors[] = t('err_smtp_port_invalid');
         }
         if ($user === '' || !filter_var($user, FILTER_VALIDATE_EMAIL)) {
-            $errors[] = 'SMTP-Benutzer muss eine gültige E-Mail-Adresse sein.';
+            $errors[] = t('err_smtp_user_invalid');
         }
         if ($pass === '' && !$allowExistingPassword) {
-            $errors[] = 'SMTP-Passwort fehlt.';
+            $errors[] = t('err_smtp_pass_missing');
         }
     }
     return $errors;
@@ -1168,17 +1608,17 @@ function validate_smtp_settings(string $mode, string $host, int $port, string $u
 function diagnostics_html(): string
 {
     $items = [];
-    $items[] = 'Aktives Datenverzeichnis: ' . DATA_DIR;
-    $items[] = 'Alternatives Datenverzeichnis: ' . ALT_DATA_DIR;
-    $items[] = 'Datenverzeichnis vorhanden: ' . (is_dir(DATA_DIR) ? 'ja' : 'nein');
-    $items[] = 'Datenverzeichnis lesbar: ' . (is_readable(DATA_DIR) ? 'ja' : 'nein');
-    $items[] = 'Datenverzeichnis schreibbar: ' . (is_writable(DATA_DIR) ? 'ja' : 'nein');
-    $items[] = 'Config vorhanden: ' . (file_exists(CONFIG_FILE) ? 'ja' : 'nein');
-    $items[] = 'Key vorhanden: ' . (file_exists(KEY_FILE) ? 'ja' : 'nein');
+    $items[] = t('diag_active_data_dir') . ' ' . DATA_DIR;
+    $items[] = t('diag_alt_data_dir') . ' ' . ALT_DATA_DIR;
+    $items[] = t('diag_data_dir_exists') . ' ' . (is_dir(DATA_DIR) ? t('word_yes') : t('word_no'));
+    $items[] = t('diag_data_dir_readable') . ' ' . (is_readable(DATA_DIR) ? t('word_yes') : t('word_no'));
+    $items[] = t('diag_data_dir_writable') . ' ' . (is_writable(DATA_DIR) ? t('word_yes') : t('word_no'));
+    $items[] = t('diag_config_exists') . ' ' . (file_exists(CONFIG_FILE) ? t('word_yes') : t('word_no'));
+    $items[] = t('diag_key_exists') . ' ' . (file_exists(KEY_FILE) ? t('word_yes') : t('word_no'));
     foreach (get_diags() as $diag) {
-        $items[] = 'Hinweis: ' . $diag;
+        $items[] = t('diag_note_prefix') . ' ' . $diag;
     }
-    $html = '<div class="alert alert-bad"><strong>Systemdiagnose</strong><br>';
+    $html = '<div class="alert alert-bad"><strong>' . h(t('diag_heading')) . '</strong><br>';
     $html .= implode('<br>', array_map('h', $items));
     $html .= '</div>';
     return $html;
@@ -1239,31 +1679,24 @@ function render_template_vars(string $text, array $vars): string
 
 function default_welcome_subject(): string
 {
-    return 'Du wurdest als Vertrauensperson hinterlegt';
+    return t('default_welcome_subject');
 }
 
 function default_welcome_body(): string
 {
-    return "Hallo,\n\n"
-        . "diese E-Mail informiert dich darüber, dass deine Adresse in einem Dead Man's Switch als Vertrauensperson oder Benachrichtigungsadresse hinterlegt wurde.\n\n"
-        . "System-URL: {{system_url}}\n"
-        . "Installiert am: {{installed_at}}\n"
-        . "Check-in-Intervall: {{interval}}\n"
-        . "Erinnerungsadresse: {{reminder_email}}\n\n"
-        . "Das bedeutet nicht, dass jetzt etwas passiert ist. Diese Mail dient nur zur Information.\n";
+    return t('default_welcome_body');
 }
 
 function default_dms_subject(): string
 {
-    return 'Dead Man\'s Switch Nachricht';
+    return t('default_dms_subject');
 }
 
 function default_dms_message(): string
 {
-    return "Diese Nachricht wurde automatisch ausgelöst, weil das Check-in-Intervall verpasst wurde.\n";
+    return t('default_dms_message');
 }
 
-// -------------------- Mail transport --------------------
 function smtp_read($fp): string
 {
     $data = '';
@@ -1415,12 +1848,12 @@ function send_admin_lockout_notification(array $config, string $ip): void
         return;
     }
 
-    $subject = 'Sicherheitswarnung: Admin-Login gesperrt';
-    $body = "Ein unberechtigter Zugriffsversuch wurde erkannt.\n\n"
-        . 'Zeit: ' . date('d.m.Y H:i:s') . "\n"
-        . 'IP: ' . $ip . "\n"
-        . 'System: ' . base_url($config) . "\n\n"
-        . 'Der Admin-Login wurde wegen zu vieler Fehlversuche vorübergehend gesperrt.';
+    $subject = t('lockout_subject');
+    $body = t('lockout_body_intro') . "\n\n"
+        . t('lockout_time_label') . date('d.m.Y H:i:s') . "\n"
+        . t('lockout_ip_label') . $ip . "\n"
+        . t('lockout_system_label') . base_url($config) . "\n\n"
+        . t('lockout_body_outro');
 
     $result = send_mail_any($recipient, $subject, $body, $payload);
     if ($result === true) {
@@ -1480,28 +1913,28 @@ function process_cron(array &$config, bool $allowMail = true): string
 {
     $payload = decrypt_payload((string)($config['encrypted_payload'] ?? ''));
     if (empty($payload)) {
-        return "Config broken: encrypted payload unreadable.";
+        return t('cron_config_broken');
     }
 
     $now = time();
     $interval = (int)($config['interval_seconds'] ?? 0);
     if ($interval <= 0) {
-        return "Setup incomplete: invalid interval.";
+        return t('cron_setup_incomplete_interval');
     }
 
     $lines = [];
-    $lines[] = 'Now: ' . date('d.m.Y H:i:s', $now);
-    $lines[] = 'Next due: ' . date('d.m.Y H:i:s', (int)$config['next_due_at']);
-    $lines[] = 'Remaining seconds: ' . max(0, (int)$config['next_due_at'] - $now);
+    $lines[] = t('cron_now') . date('d.m.Y H:i:s', $now);
+    $lines[] = t('cron_next_due') . date('d.m.Y H:i:s', (int)$config['next_due_at']);
+    $lines[] = t('cron_remaining_seconds') . max(0, (int)$config['next_due_at'] - $now);
 
     if (!empty($config['triggered'])) {
-        $lines[] = 'Alarm already triggered.';
+        $lines[] = t('cron_already_triggered');
         if (!empty($config['triggered_at'])) {
-            $lines[] = 'Triggered at: ' . date('d.m.Y H:i:s', (int)$config['triggered_at']);
+            $lines[] = t('cron_triggered_at') . date('d.m.Y H:i:s', (int)$config['triggered_at']);
         }
         $res = $config['last_dispatch_result'] ?? ['ok' => [], 'fail' => []];
-        $lines[] = 'Successful deliveries: ' . count($res['ok'] ?? []);
-        $lines[] = 'Failed deliveries: ' . count($res['fail'] ?? []);
+        $lines[] = t('cron_successful_deliveries') . count($res['ok'] ?? []);
+        $lines[] = t('cron_failed_deliveries') . count($res['fail'] ?? []);
         return implode("\n", $lines);
     }
 
@@ -1511,42 +1944,42 @@ function process_cron(array &$config, bool $allowMail = true): string
     $reminderSentThisCycle = !empty($config['reminder_sent_this_cycle']);
 
     if ($allowMail && !$reminderSentThisCycle && $reminderEmail !== '' && filter_var($reminderEmail, FILTER_VALIDATE_EMAIL) && $now >= $reminderAt && $now < (int)$config['next_due_at']) {
-        $subject = 'Erinnerung: Dead Man\'s Switch Check-in bald fällig';
-        $body = "Dies ist eine automatische Erinnerung.\n\n"
-            . "Bitte führe bald deinen Dead Man's Switch Check-in aus.\n"
-            . "Nächste Fälligkeit: " . date('d.m.Y H:i:s', (int)$config['next_due_at']) . "\n"
-            . "Restzeit: " . format_remaining((int)$config['next_due_at'] - $now) . "\n"
-            . "Check-in-Link: " . base_url($config) . "/checkin\n";
+        $subject = t('reminder_subject');
+        $body = t('reminder_body_intro') . "\n\n"
+            . t('reminder_body_action') . "\n"
+            . t('reminder_next_due_label') . date('d.m.Y H:i:s', (int)$config['next_due_at']) . "\n"
+            . t('reminder_remaining_label') . format_remaining((int)$config['next_due_at'] - $now) . "\n"
+            . t('reminder_link_label') . base_url($config) . "/checkin\n";
         $res = send_mail_any($reminderEmail, $subject, $body, $payload);
         if ($res === true) {
             $config['reminder_sent_this_cycle'] = true;
             $config['last_reminder_sent_at'] = $now;
             write_config($config);
-            $lines[] = 'Reminder sent.';
+            $lines[] = t('cron_reminder_sent');
         } else {
-            $lines[] = 'Reminder failed: ' . $res;
+            $lines[] = t('cron_reminder_failed') . $res;
         }
     }
 
     if ($now >= (int)$config['next_due_at']) {
         if ($allowMail) {
             $result = trigger_dms($config, $payload);
-            $lines[] = 'Alarm triggered. Messages dispatched.';
-            $lines[] = 'Successful deliveries: ' . count($result['ok']);
-            $lines[] = 'Failed deliveries: ' . count($result['fail']);
+            $lines[] = t('cron_alarm_triggered');
+            $lines[] = t('cron_successful_deliveries') . count($result['ok']);
+            $lines[] = t('cron_failed_deliveries') . count($result['fail']);
             if (!empty($result['fail'])) {
                 foreach ($result['fail'] as $mail => $err) {
-                    $lines[] = 'FAIL ' . $mail . ': ' . $err;
+                    $lines[] = t('cron_fail_prefix') . $mail . ': ' . $err;
                 }
             }
         } else {
-            $lines[] = 'Alarm would trigger now.';
+            $lines[] = t('cron_would_trigger');
         }
         return implode("\n", $lines);
     }
 
     if (count($lines) === 3) {
-        $lines[] = 'All good.';
+        $lines[] = t('cron_all_good');
     }
     return implode("\n", $lines);
 }
@@ -1581,8 +2014,8 @@ function render_header(string $title, string $theme = 'light'): void
 {
     apply_security_headers();
     $theme = normalize_theme($theme);
-    echo '<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
-    echo '<title>' . theme_mascot($theme, 'html') . ' Deadman-Switch 2.0</title>';
+    echo '<!doctype html><html lang="' . h(current_language()) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
+    echo '<title>' . theme_mascot($theme, 'html') . ' ' . h(APP_NAME) . ' ' . h(APP_VERSION) . '</title>';
     echo '<style>
         :root{--bg:#f4fbff;--bg-soft:#eef7fb;--surface:rgba(255,255,255,.68);--surface-strong:rgba(255,255,255,.82);--border:rgba(148,163,184,.32);--border-strong:rgba(148,163,184,.5);--shadow:0 24px 60px rgba(110,140,170,.22);--text:#16324a;--heading:#12314b;--muted:#5f7890;--accent:#3ca6d8;--accent-2:#7cc7e8;--accent-deep:#1f78a7;--ok:#dff7e8;--oktxt:#1f6b45;--bad:#ffe4e6;--badtxt:#a63f54;--warn:#fff1c7;--warntxt:#9b6a10;--field-bg:rgba(255,255,255,.9);--field-bg-focus:#fff;--field-text:#16324a;--field-placeholder:#6f879b}
         body.theme-dark{--bg:#0f1724;--bg-soft:#162235;--surface:rgba(18,29,44,.82);--surface-strong:rgba(22,35,53,.92);--border:rgba(118,143,173,.22);--border-strong:rgba(128,154,184,.34);--shadow:0 24px 60px rgba(0,0,0,.38);--text:#dbe8f5;--heading:#f3f8fd;--muted:#9eb2c7;--accent:#56b4e8;--accent-2:#8fd6ff;--accent-deep:#2977a5;--ok:#173729;--oktxt:#93e2b5;--bad:#3d1d25;--badtxt:#ffb8c2;--warn:#3f3518;--warntxt:#ffe19a;--field-bg:rgba(10,18,29,.92);--field-bg-focus:rgba(14,24,38,.98);--field-text:#f2f7fc;--field-placeholder:#8ea4ba}
@@ -1778,14 +2211,15 @@ function render_footer(): void
     });
     var clock = document.getElementById("dashboard-clock");
     if (clock) {
+        var clockLocale = "' . (current_language() === 'en' ? 'en-GB' : 'de-AT') . '";
         var updateClock = function(){
             var now = new Date();
-            var datePart = now.toLocaleDateString("de-AT", {
+            var datePart = now.toLocaleDateString(clockLocale, {
                 day: "2-digit",
                 month: "2-digit",
                 year: "numeric"
             });
-            var timePart = now.toLocaleTimeString("de-AT", {
+            var timePart = now.toLocaleTimeString(clockLocale, {
                 hour: "2-digit",
                 minute: "2-digit",
                 second: "2-digit"
@@ -1798,7 +2232,6 @@ function render_footer(): void
     </script></div></body></html>';
 }
 
-// -------------------- Routing: logout / cron / checkin --------------------
 if (isset($_GET['logout'])) {
     invalidate_admin_session();
     header('Location: ' . safe_self_path() . '?logged_out=1');
@@ -1806,6 +2239,7 @@ if (isset($_GET['logout'])) {
 }
 
 $config = read_config();
+set_current_language($config);
 $isCli = PHP_SAPI === 'cli';
 
 if (!$isCli && isset($_GET['captcha'])) {
@@ -1839,7 +2273,7 @@ if (!$isCli && isset($_GET['logs_fragment'])) {
 
 if ($isCli && isset($argv[1]) && $argv[1] === 'cron') {
     if (!$config) {
-        echo "Setup incomplete.\n";
+        echo t('cron_setup_incomplete') . "\n";
         exit;
     }
     echo process_cron($config, true) . "\n";
@@ -1850,12 +2284,12 @@ if (!$isCli && isset($_GET['cron_token'])) {
     header('Content-Type: text/plain; charset=UTF-8');
     if (!$config) {
         http_response_code(503);
-        echo "Setup incomplete.\n";
+        echo t('cron_setup_incomplete') . "\n";
         exit;
     }
     if (!hash_equals((string)($config['cron_token'] ?? ''), (string)$_GET['cron_token'])) {
         http_response_code(403);
-        echo "Invalid cron token.\n";
+        echo t('cron_invalid_token') . "\n";
         exit;
     }
     echo process_cron($config, true) . "\n";
@@ -1870,7 +2304,7 @@ if (!$isCli && isset($_GET['checkin'])) {
 if (!$isCli && route_suffix() === '/checkin') {
     if (!$config) {
         http_response_code(503);
-        die('Setup unvollständig.');
+        die(t('cron_setup_incomplete'));
     }
 
     $error = '';
@@ -1903,7 +2337,7 @@ if (!$isCli && route_suffix() === '/checkin') {
         if (!is_checkin_authenticated() || is_pin_locked() || !checkin_allowed($ip)) {
             force_checkin_reauthentication();
             $_SESSION['checkin_reauth_required'] = true;
-            $error = 'Zusätzliche Authentifizierung erforderlich.';
+            $error = t('err_reauth_required');
             log_event('Check-in failure');
         } elseif (!verify_captcha('checkin', $captcha)) {
             record_checkin_failure($ip, $config);
@@ -1913,7 +2347,7 @@ if (!$isCli && route_suffix() === '/checkin') {
             if ((int)($pinState['failures'] ?? 0) >= rate_limit_max_failures($config) || !checkin_allowed($ip)) {
                 force_checkin_reauthentication();
                 $_SESSION['checkin_reauth_required'] = true;
-                $error = 'PIN-Eingabe gesperrt. Bitte erneut mit dem Admin-Passwort authentifizieren.';
+                $error = t('err_pin_locked');
             } else {
                 $error = delay_message($attempt);
             }
@@ -1926,7 +2360,7 @@ if (!$isCli && route_suffix() === '/checkin') {
             if ((int)($pinState['failures'] ?? 0) >= rate_limit_max_failures($config) || !checkin_allowed($ip)) {
                 force_checkin_reauthentication();
                 $_SESSION['checkin_reauth_required'] = true;
-                $error = 'PIN-Eingabe gesperrt. Bitte erneut mit dem Admin-Passwort authentifizieren.';
+                $error = t('err_pin_locked');
             } else {
                 $error = delay_message($attempt);
             }
@@ -1947,7 +2381,7 @@ if (!$isCli && route_suffix() === '/checkin') {
             if ((int)$pinState['failures'] >= rate_limit_max_failures($config) || !checkin_allowed($ip)) {
                 force_checkin_reauthentication();
                 $_SESSION['checkin_reauth_required'] = true;
-                $error = 'PIN-Eingabe gesperrt. Bitte erneut mit dem Admin-Passwort authentifizieren.';
+                $error = t('err_pin_locked');
             } else {
                 $error = delay_message($attempt);
             }
@@ -1963,8 +2397,8 @@ if (!$isCli && route_suffix() === '/checkin') {
     echo '<div class="page-shell narrow viewport-center"><div class="card hero center-card" style="width:min(100%,560px)">';
     if ($success) {
         echo '<div style="font-size: 4rem; margin-bottom: 10px;">' . theme_mascot((string)($config['theme'] ?? 'light'), 'html') . '</div>';
-        echo '<h2>Check-in erfolgreich</h2>';
-        echo '<p>N&auml;chste F&auml;lligkeit: <strong><span style="white-space:nowrap;">' . h(date('d.m.Y H:i', (int)$config['next_due_at'])) . '</span></strong></p>';
+        echo '<h2>' . h(t('checkin_success_title')) . '</h2>';
+        echo '<p>' . h(t('checkin_next_due_label')) . ' <strong><span style="white-space:nowrap;">' . h(date('d.m.Y H:i', (int)$config['next_due_at'])) . '</span></strong></p>';
         echo '<script>setTimeout(function(){ try { window.close(); } catch (e) {} setTimeout(function(){ try { window.open("", "_self"); window.close(); } catch (e) {} setTimeout(function(){ try { location.replace("about:blank"); } catch (e) {} }, 300); }, 300); }, 2500);</script>';
     } else {
         echo '<h2>' . theme_mascot((string)($config['theme'] ?? 'light'), 'html') . '</h2>';
@@ -1977,7 +2411,7 @@ if (!$isCli && route_suffix() === '/checkin') {
             echo '<input type="hidden" name="form_name" value="admin_login">';
             echo '<div class="auth-field"><input type="password" name="password" autocomplete="current-password" required></div>';
             echo '<div style="margin-top:16px">' . render_captcha_html('admin_login', 'Captcha', false, 'captcha-compact') . '</div>';
-            echo '<div style="margin-top:16px"><button type="submit">Admin-Login</button></div>';
+            echo '<div style="margin-top:16px"><button type="submit">' . h(t('btn_admin_login')) . '</button></div>';
             echo '</form>';
         } else {
             echo '<form method="POST" class="stack auth-form" autocomplete="off" data-bwignore="true">';
@@ -1985,7 +2419,7 @@ if (!$isCli && route_suffix() === '/checkin') {
             echo '<input type="hidden" name="form_name" value="pin_checkin">';
             echo '<div class="auth-field"><input class="pin-input" type="tel" name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="****" autocomplete="off" data-bwignore="true" enterkeyhint="done" required oninput="this.value=this.value.replace(/\\D/g, \'\').slice(0,4)"></div>';
             echo render_captcha_html('checkin', 'Captcha', false, 'captcha-compact');
-            echo '<button class="pin-button" type="submit">Best&auml;tigen</button>';
+            echo '<button class="pin-button" type="submit">' . h(t('btn_confirm')) . '</button>';
             echo '</form>';
         }
     }
@@ -1994,7 +2428,6 @@ if (!$isCli && route_suffix() === '/checkin') {
     exit;
 }
 
-// -------------------- Setup --------------------
 if (!$config) {
     $msg = '';
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -2022,12 +2455,12 @@ if (!$config) {
         $errors = [];
         $passwordError = validate_admin_password($password);
         if ($passwordError !== null) $errors[] = $passwordError;
-        if (!preg_match('/^\d{4}$/', $pin)) $errors[] = 'PIN muss genau 4 Ziffern haben.';
-        if ($interval < 60) $errors[] = 'Intervall mindestens 1 Minute.';
-        if (empty(parse_emails($recipientsCsv))) $errors[] = 'Mindestens eine gültige Empfängeradresse erforderlich.';
-        if ($reminderEmail === '' || !filter_var($reminderEmail, FILTER_VALIDATE_EMAIL)) $errors[] = 'Gültige Erinnerungs-Mailadresse erforderlich.';
-        if ($dmsSubject === '' || $dmsMessage === '') $errors[] = 'DMS-Betreff und Nachricht sind erforderlich.';
-        if ($welcomeSubject === '' || $welcomeBody === '') $errors[] = 'Willkommens-Betreff und -Text sind erforderlich.';
+        if (!preg_match('/^\d{4}$/', $pin)) $errors[] = t('err_pin_digits');
+        if ($interval < 60) $errors[] = t('err_interval_min');
+        if (empty(parse_emails($recipientsCsv))) $errors[] = t('err_recipients_required');
+        if ($reminderEmail === '' || !filter_var($reminderEmail, FILTER_VALIDATE_EMAIL)) $errors[] = t('err_reminder_email_required');
+        if ($dmsSubject === '' || $dmsMessage === '') $errors[] = t('err_dms_fields_required');
+        if ($welcomeSubject === '' || $welcomeBody === '') $errors[] = t('err_welcome_fields_required');
         $errors = array_merge($errors, validate_smtp_settings($smtpMode, $smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $smtpSecure));
 
         if (!$errors) {
@@ -2059,6 +2492,7 @@ if (!$config) {
                     'interval_seconds' => $interval,
                     'last_checkin_at' => time(),
                     'next_due_at' => time() + $interval,
+                    'language' => 'de',
                     'cron_token' => bin2hex(random_bytes(20)),
                     'triggered' => false,
                     'triggered_at' => null,
@@ -2071,16 +2505,16 @@ if (!$config) {
                 reset_pin_state();
                 clearstatcache(true, CONFIG_FILE);
                 if (!file_exists(CONFIG_FILE)) {
-                    throw new RuntimeException('Konfigurationsdatei wurde nach dem Schreiben nicht gefunden: ' . CONFIG_FILE);
+                    throw new RuntimeException(t('err_config_not_found_after_write') . ' ' . CONFIG_FILE);
                 }
                 $welcomeResult = send_welcome_mails($cfg, $payload);
                 log_event('System installed. Welcome mails ok=' . count($welcomeResult['ok']) . ' fail=' . count($welcomeResult['fail']));
-                $_SESSION['setup_notice'] = 'Setup abgeschlossen. Willkommensmails erfolgreich: ' . count($welcomeResult['ok']) . ', fehlgeschlagen: ' . count($welcomeResult['fail']);
+                $_SESSION['setup_notice'] = t('setup_notice_template', ['{{ok}}' => (string)count($welcomeResult['ok']), '{{fail}}' => (string)count($welcomeResult['fail'])]);
                 header('Location: ' . safe_self_path());
                 exit;
             } catch (Throwable $e) {
                 add_diag($e->getMessage());
-                $errors[] = 'Setup konnte nicht gespeichert werden.';
+                $errors[] = t('err_setup_save_failed');
             }
         }
         $msg = '<div class="alert alert-bad">' . implode('<br>', array_map('h', $errors)) . '</div>';
@@ -2089,51 +2523,50 @@ if (!$config) {
     render_header('Ersteinrichtung', 'light');
     echo '<div class="page-shell">';
     echo '<div class="card hero">';
-    echo '<h1>Dead Man\'s Switch - Ersteinrichtung</h1>';
-    echo '<p class="intro">Das System wird in einem hellen, klar strukturierten Setup eingerichtet. Alle Eingaben bleiben funktional unverändert, damit die Auslieferung und Check-ins danach wie gewohnt laufen.</p>';
+    echo '<h1>' . h(t('setup_page_title')) . '</h1>';
+    echo '<p class="intro">' . h(t('setup_intro')) . '</p>';
     echo $msg;
     if ($msg !== '' || !empty(get_diags())) echo diagnostics_html();
     echo '<form method="post" autocomplete="off" data-bwignore="true">';
     echo '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '">';
-    echo '<h3>1. Sicherheit</h3><div class="grid">';
-    echo '<div><label>Admin-Passwort</label><input type="password" name="password" autocomplete="new-password" data-bwignore="true" required></div>';
-    echo '<div><label>Check-in PIN (4-stellig)</label><input type="text" name="pin" pattern="\d{4}" maxlength="4" inputmode="numeric" autocomplete="off" data-bwignore="true" required></div>';
+    echo '<h3>' . h(t('setup_step1_title')) . '</h3><div class="grid">';
+    echo '<div><label>' . h(t('label_admin_password')) . '</label><input type="password" name="password" autocomplete="new-password" data-bwignore="true" required></div>';
+    echo '<div><label>' . h(t('label_checkin_pin')) . '</label><input type="text" name="pin" pattern="\d{4}" maxlength="4" inputmode="numeric" autocomplete="off" data-bwignore="true" required></div>';
     echo '</div>';
-    echo '<p class="small muted">Das Admin-Passwort muss mindestens 12 Zeichen sowie Gross-/Kleinbuchstaben, Zahl und Sonderzeichen enthalten.</p>';
+    echo '<p class="small muted">' . h(t('setup_password_note')) . '</p>';
 
-    echo '<h3>2. Intervall</h3><div class="grid3">';
-    echo '<div><label>Tage</label><input type="number" name="days" min="0" value="1" autocomplete="off" data-bwignore="true"></div>';
-    echo '<div><label>Stunden</label><input type="number" name="hours" min="0" value="0" autocomplete="off" data-bwignore="true"></div>';
-    echo '<div><label>Minuten</label><input type="number" name="minutes" min="0" value="0" autocomplete="off" data-bwignore="true"></div>';
-    echo '</div><p class="small muted">Jeder Check-in startet dieses Intervall neu ab genau dem Klick-Zeitpunkt.</p>';
+    echo '<h3>' . h(t('setup_step2_title')) . '</h3><div class="grid3">';
+    echo '<div><label>' . h(t('label_days')) . '</label><input type="number" name="days" min="0" value="1" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_hours')) . '</label><input type="number" name="hours" min="0" value="0" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_minutes')) . '</label><input type="number" name="minutes" min="0" value="0" autocomplete="off" data-bwignore="true"></div>';
+    echo '</div><p class="small muted">' . h(t('setup_interval_note')) . '</p>';
 
-    echo '<h3>3. Adressen und Inhalte</h3>';
-    echo '<label>Vertrauenspersonen / Empfänger (Komma oder Zeilenumbruch getrennt)</label><textarea name="recipients_csv" autocomplete="off" data-bwignore="true" required></textarea>';
-    echo '<label>Erinnerungs-Mailadresse (bekommt bei ca. 20% Restzeit die Erinnerung)</label><input type="email" name="reminder_email" autocomplete="off" data-bwignore="true" required>';
-    echo '<label>DMS-Betreff</label><input type="text" name="dms_subject" value="' . h(default_dms_subject()) . '" autocomplete="off" data-bwignore="true" required>';
-    echo '<label>DMS-Nachricht</label><textarea name="dms_message" autocomplete="off" data-bwignore="true" required>' . h(default_dms_message()) . '</textarea>';
-    echo '<label>Willkommensmail Betreff</label><input type="text" name="welcome_subject" value="' . h(default_welcome_subject()) . '" autocomplete="off" data-bwignore="true" required>';
-    echo '<label>Willkommensmail Text</label><textarea name="welcome_body" autocomplete="off" data-bwignore="true" required>' . h(default_welcome_body()) . '</textarea>';
-    echo '<p class="small muted">Platzhalter: {{installed_at}}, {{system_url}}, {{interval}}, {{reminder_email}}, {{recipient_email}}</p>';
+    echo '<h3>' . h(t('setup_step3_title')) . '</h3>';
+    echo '<label>' . h(t('label_recipients_setup')) . '</label><textarea name="recipients_csv" autocomplete="off" data-bwignore="true" required></textarea>';
+    echo '<label>' . h(t('label_reminder_email_setup')) . '</label><input type="email" name="reminder_email" autocomplete="off" data-bwignore="true" required>';
+    echo '<label>' . h(t('label_dms_subject')) . '</label><input type="text" name="dms_subject" value="' . h(default_dms_subject()) . '" autocomplete="off" data-bwignore="true" required>';
+    echo '<label>' . h(t('label_dms_message')) . '</label><textarea name="dms_message" autocomplete="off" data-bwignore="true" required>' . h(default_dms_message()) . '</textarea>';
+    echo '<label>' . h(t('label_welcome_subject')) . '</label><input type="text" name="welcome_subject" value="' . h(default_welcome_subject()) . '" autocomplete="off" data-bwignore="true" required>';
+    echo '<label>' . h(t('label_welcome_body')) . '</label><textarea name="welcome_body" autocomplete="off" data-bwignore="true" required>' . h(default_welcome_body()) . '</textarea>';
+    echo '<p class="small muted">' . h(t('note_placeholders')) . '</p>';
 
-    echo '<h3>4. Mailversand</h3><div class="grid">';
-    echo '<div><label>Versandmodus</label><select name="smtp_mode" autocomplete="off" data-bwignore="true"><option value="smtp">SMTP</option><option value="mail">PHP mail()</option></select></div>';
-    echo '<div><label>Sicherheit</label><select name="smtp_secure" autocomplete="off" data-bwignore="true"><option value="tls">TLS / STARTTLS</option><option value="ssl">SSL</option></select></div>';
+    echo '<h3>' . h(t('setup_step4_title')) . '</h3><div class="grid">';
+    echo '<div><label>' . h(t('label_send_mode')) . '</label><select name="smtp_mode" autocomplete="off" data-bwignore="true"><option value="smtp">SMTP</option><option value="mail">PHP mail()</option></select></div>';
+    echo '<div><label>' . h(t('label_smtp_secure')) . '</label><select name="smtp_secure" autocomplete="off" data-bwignore="true"><option value="tls">TLS / STARTTLS</option><option value="ssl">SSL</option></select></div>';
     echo '</div><div class="grid">';
-    echo '<div><label>SMTP Host</label><input type="text" name="smtp_host" value="mail.gmx.net" autocomplete="off" data-bwignore="true"></div>';
-    echo '<div><label>SMTP Port</label><input type="number" name="smtp_port" value="587" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_smtp_host')) . '</label><input type="text" name="smtp_host" value="mail.gmx.net" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_smtp_port')) . '</label><input type="number" name="smtp_port" value="587" autocomplete="off" data-bwignore="true"></div>';
     echo '</div><div class="grid">';
-    echo '<div><label>SMTP Benutzer</label><input type="email" name="smtp_user" autocomplete="off" data-bwignore="true"></div>';
-    echo '<div><label>SMTP Passwort / App-Passwort</label><input type="password" name="smtp_pass" autocomplete="new-password" data-bwignore="true"></div>';
-    echo '</div><label>Absenderadresse</label><input type="email" name="smtp_from" autocomplete="off" data-bwignore="true">';
+    echo '<div><label>' . h(t('label_smtp_user')) . '</label><input type="email" name="smtp_user" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_smtp_pass_setup')) . '</label><input type="password" name="smtp_pass" autocomplete="new-password" data-bwignore="true"></div>';
+    echo '</div><label>' . h(t('label_sender_address')) . '</label><input type="email" name="smtp_from" autocomplete="off" data-bwignore="true">';
 
-    echo '<button type="submit">Setup abschließen</button>';
+    echo '<button type="submit">' . h(t('btn_finish_setup')) . '</button>';
     echo '</form></div></div>';
     render_footer();
     exit;
 }
 
-// -------------------- Login --------------------
 $ip = client_ip();
 if (!is_admin_authenticated()) {
     $notice = $_SESSION['setup_notice'] ?? '';
@@ -2161,14 +2594,14 @@ if (!is_admin_authenticated()) {
     echo '<input type="hidden" name="form_name" value="admin_login">';
     echo '<div class="auth-field"><input id="admin-login-password" type="password" name="password" autocomplete="current-password" required></div>';
     echo '<div style="margin-top:16px">' . render_captcha_html('admin_login', 'Captcha', false, 'captcha-compact') . '</div>';
-    echo '<div style="margin-top:16px"><button type="submit">Einloggen</button></div>';
+    echo '<div style="margin-top:16px"><button type="submit">' . h(t('btn_login')) . '</button></div>';
     echo '</form></div></div>';
     render_footer();
     exit;
 }
 
-// -------------------- Dashboard actions --------------------
 $config = read_config();
+set_current_language($config);
 $payload = decrypt_payload((string)$config['encrypted_payload']);
 $flash = '';
 
@@ -2178,7 +2611,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'manual_checkin') {
         complete_manual_checkin($config);
-        $flash = '<div class="alert alert-ok">Intervall manuell neu gestartet.</div>';
+        $flash = '<div class="alert alert-ok">' . h(t('flash_interval_restarted')) . '</div>';
     }
 
     if ($action === 'save_interval') {
@@ -2187,11 +2620,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $minutes = max(0, (int)($_POST['minutes'] ?? 0));
         $interval = $days * 86400 + $hours * 3600 + $minutes * 60;
         if ($interval < 60) {
-            $flash = '<div class="alert alert-bad">Intervall mindestens 1 Minute.</div>';
+            $flash = '<div class="alert alert-bad">' . h(t('err_interval_min')) . '</div>';
         } else {
             $config['interval_seconds'] = $interval;
             complete_manual_checkin($config);
-            $flash = '<div class="alert alert-ok">Intervall gespeichert und neu gestartet.</div>';
+            $flash = '<div class="alert alert-ok">' . h(t('flash_interval_saved')) . '</div>';
         }
     }
 
@@ -2199,14 +2632,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $theme = normalize_theme((string)($_POST['theme'] ?? 'light'));
         $config['theme'] = $theme;
         write_config($config);
-        $flash = '<div class="alert alert-ok">Theme gespeichert.</div>';
+        $flash = '<div class="alert alert-ok">' . h(t('flash_theme_saved')) . '</div>';
+    }
+
+    if ($action === 'save_language') {
+        $language = (string)($_POST['language'] ?? 'de');
+        $language = in_array($language, ['de', 'en'], true) ? $language : 'de';
+        $config['language'] = $language;
+        write_config($config);
+        set_current_language($config);
+        $flash = '<div class="alert alert-ok">' . h(t('flash_language_saved')) . '</div>';
     }
 
     if ($action === 'save_rate_limit') {
         $maxFailures = max(1, min(50, (int)($_POST['rate_limit_max_failures'] ?? PIN_MAX_FAILURES)));
         $config['rate_limit_max_failures'] = $maxFailures;
         write_config($config);
-        $flash = '<div class="alert alert-ok">Rate-Limiter-Einstellungen gespeichert.</div>';
+        $flash = '<div class="alert alert-ok">' . h(t('flash_rate_limit_saved')) . '</div>';
     }
 
     if ($action === 'save_security') {
@@ -2218,32 +2660,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         $errors = [];
         if ($currentPassword === '' || !password_verify($currentPassword, (string)$config['password_hash'])) {
-            $errors[] = 'Aktuelles Admin-Passwort ist falsch.';
+            $errors[] = t('err_current_password_wrong');
         }
 
         $changeAdminPassword = ($newAdminPassword !== '' || $newAdminPasswordConfirm !== '');
         $changePin = ($newPin !== '' || $newPinConfirm !== '');
 
         if (!$changeAdminPassword && !$changePin) {
-            $errors[] = 'Bitte gib ein neues Admin-Passwort und/oder eine neue PIN ein.';
+            $errors[] = t('err_need_new_password_or_pin');
         }
 
         if ($changeAdminPassword) {
-            $passwordError = validate_admin_password($newAdminPassword);
+            $passwordError = validate_admin_password($newAdminPassword, t('field_new_admin_password_label'));
             if ($passwordError !== null) {
-                $errors[] = str_replace('Admin-Passwort', 'Neues Admin-Passwort', $passwordError);
+                $errors[] = $passwordError;
             }
             if (!hash_equals($newAdminPassword, $newAdminPasswordConfirm)) {
-                $errors[] = 'Die Bestätigung des neuen Admin-Passworts stimmt nicht überein.';
+                $errors[] = t('err_password_confirm_mismatch');
             }
         }
 
         if ($changePin) {
             if (!preg_match('/^\d{4}$/', $newPin)) {
-                $errors[] = 'Die neue PIN muss genau 4 Ziffern haben.';
+                $errors[] = t('err_new_pin_digits');
             }
             if (!hash_equals($newPin, $newPinConfirm)) {
-                $errors[] = 'Die Bestätigung der neuen PIN stimmt nicht überein.';
+                $errors[] = t('err_pin_confirm_mismatch');
             }
         }
 
@@ -2260,9 +2702,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             write_config($config);
             log_event('Security credentials updated via dashboard');
             $parts = [];
-            if ($changeAdminPassword) $parts[] = 'Admin-Passwort';
-            if ($changePin) $parts[] = 'PIN';
-            $flash = '<div class="alert alert-ok">' . h(implode(' und ', $parts) . ' erfolgreich aktualisiert.') . '</div>';
+            if ($changeAdminPassword) $parts[] = t('field_admin_password_short');
+            if ($changePin) $parts[] = t('field_pin_short');
+            $flash = '<div class="alert alert-ok">' . h(t('flash_credentials_updated_template', ['{{items}}' => implode(t('word_and'), $parts)])) . '</div>';
         }
     }
 
@@ -2282,10 +2724,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $smtpSecure = trim((string)($_POST['smtp_secure'] ?? 'tls'));
 
         $errors = [];
-        if (empty(parse_emails($recipientsCsv))) $errors[] = 'Mindestens eine gültige Empfängeradresse erforderlich.';
-        if ($reminderEmail === '' || !filter_var($reminderEmail, FILTER_VALIDATE_EMAIL)) $errors[] = 'Gültige Erinnerungs-Mailadresse erforderlich.';
-        if ($dmsSubject === '' || $dmsMessage === '') $errors[] = 'DMS-Betreff und Text dürfen nicht leer sein.';
-        if ($welcomeSubject === '' || $welcomeBody === '') $errors[] = 'Willkommens-Betreff und Text dürfen nicht leer sein.';
+        if (empty(parse_emails($recipientsCsv))) $errors[] = t('err_recipients_required');
+        if ($reminderEmail === '' || !filter_var($reminderEmail, FILTER_VALIDATE_EMAIL)) $errors[] = t('err_reminder_email_required');
+        if ($dmsSubject === '' || $dmsMessage === '') $errors[] = t('err_dms_fields_required');
+        if ($welcomeSubject === '' || $welcomeBody === '') $errors[] = t('err_welcome_fields_required');
         $errors = array_merge($errors, validate_smtp_settings($smtpMode, $smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $smtpSecure, !empty(($payload['smtp']['pass'] ?? ''))));
 
         if ($errors) {
@@ -2308,7 +2750,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ];
             $config['encrypted_payload'] = encrypt_payload($payload);
             write_config($config);
-            $flash = '<div class="alert alert-ok">Adressen, DMS-Nachricht, Willkommensmail und Mailversand gespeichert.</div>';
+            $flash = '<div class="alert alert-ok">' . h(t('flash_payload_saved')) . '</div>';
         }
     }
 
@@ -2338,34 +2780,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ];
             $config['encrypted_payload'] = encrypt_payload($payload);
             write_config($config);
-            $flash = '<div class="alert alert-ok">Mailversand gespeichert.</div>';
+            $flash = '<div class="alert alert-ok">' . h(t('flash_mail_settings_saved')) . '</div>';
         }
     }
 
     if ($action === 'send_test_dms') {
         $recipients = parse_emails((string)($payload['recipients_csv'] ?? ''));
         $subject = '[TEST] ' . (string)($payload['dms_subject'] ?? default_dms_subject());
-        $body = "Dies ist ein Testversand.\n\n" . (string)($payload['dms_message'] ?? default_dms_message());
+        $body = t('test_dms_prefix') . "\n\n" . (string)($payload['dms_message'] ?? default_dms_message());
         $result = send_bulk($recipients, $subject, $body, $payload);
         $flash = '<div class="alert ' . (empty($result['fail']) ? 'alert-ok' : 'alert-bad') . '">'
-            . 'Test-DMS: erfolgreich ' . count($result['ok']) . ', fehlgeschlagen ' . count($result['fail']) . '</div>';
+            . h(t('flash_test_dms_template', ['{{ok}}' => (string)count($result['ok']), '{{fail}}' => (string)count($result['fail'])])) . '</div>';
     }
 
     if ($action === 'send_test_welcome') {
         $result = send_welcome_mails($config, $payload);
         $flash = '<div class="alert ' . (empty($result['fail']) ? 'alert-ok' : 'alert-bad') . '">'
-            . 'Willkommensmail-Test: erfolgreich ' . count($result['ok']) . ', fehlgeschlagen ' . count($result['fail']) . '</div>';
+            . h(t('flash_test_welcome_template', ['{{ok}}' => (string)count($result['ok']), '{{fail}}' => (string)count($result['fail'])])) . '</div>';
     }
 
     if ($action === 'send_test_reminder') {
         $rem = trim((string)($payload['reminder_email'] ?? ''));
         if ($rem === '' || !filter_var($rem, FILTER_VALIDATE_EMAIL)) {
-            $flash = '<div class="alert alert-bad">Keine gültige Erinnerungs-Mailadresse gespeichert.</div>';
+            $flash = '<div class="alert alert-bad">' . h(t('err_no_reminder_email')) . '</div>';
         } else {
-            $subject = '[TEST] Erinnerung: Dead Man\'s Switch Check-in';
-            $body = "Dies ist eine Test-Erinnerung.\n\nCheck-in-Link: " . base_url($config) . "/checkin";
+            $subject = t('test_reminder_subject');
+            $body = t('test_reminder_body_intro') . "\n\n" . t('reminder_link_label') . base_url($config) . "/checkin";
             $res = send_mail_any($rem, $subject, $body, $payload);
-            $flash = '<div class="alert ' . ($res === true ? 'alert-ok' : 'alert-bad') . '">' . h($res === true ? 'Test-Erinnerung gesendet.' : 'Fehler: ' . $res) . '</div>';
+            $flash = '<div class="alert ' . ($res === true ? 'alert-ok' : 'alert-bad') . '">' . h($res === true ? t('flash_test_reminder_sent') : t('err_prefix') . $res) . '</div>';
         }
     }
 
@@ -2377,16 +2819,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'clear_logs') {
         $currentPassword = (string)($_POST['current_admin_password'] ?? '');
         if ($currentPassword === '' || !password_verify($currentPassword, (string)$config['password_hash'])) {
-            $flash = '<div class="alert alert-bad">Aktuelles Admin-Passwort ist falsch.</div>';
+            $flash = '<div class="alert alert-bad">' . h(t('err_current_password_wrong')) . '</div>';
         } else {
             try {
                 require_data_dir_ready();
                 write_file_strict(LOG_FILE, '', 0);
                 safe_chmod(LOG_FILE, 0600);
                 log_event('Logs cleared via dashboard by admin');
-                $flash = '<div class="alert alert-ok">Logs wurden gelöscht.</div>';
+                $flash = '<div class="alert alert-ok">' . h(t('flash_logs_cleared')) . '</div>';
             } catch (Throwable $e) {
-                $flash = '<div class="alert alert-bad">' . h('Logs konnten nicht gelöscht werden: ' . $e->getMessage()) . '</div>';
+                $flash = '<div class="alert alert-bad">' . h(t('err_logs_clear_failed_template', ['{{error}}' => $e->getMessage()])) . '</div>';
             }
         }
     }
@@ -2402,162 +2844,169 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     $config = read_config();
+    set_current_language($config);
     $payload = decrypt_payload((string)$config['encrypted_payload']);
 }
 
-// -------------------- Dashboard render --------------------
 $checkinUrl = base_url($config) . '/checkin';
 $cronUrl = base_url($config) . '?cron_token=' . $config['cron_token'];
 $now = time();
 $remaining = (int)$config['next_due_at'] - $now;
 $thresholdAt = (int)$config['next_due_at'] - (int)floor((int)$config['interval_seconds'] * 0.2);
-$statusText = !empty($config['triggered']) ? 'JA - Mails versendet!' : 'NEIN - Alles okay';
+$statusText = !empty($config['triggered']) ? t('status_triggered_yes') : t('status_triggered_no');
 $statusClass = !empty($config['triggered']) ? 'bad' : 'ok';
 
 render_header('Dashboard', normalize_theme((string)($config['theme'] ?? 'light')));
 echo '<div class="page-shell">';
 echo '<div class="card hero">';
-echo '<div class="top"><div><h1>' . theme_mascot((string)($config['theme'] ?? 'light'), 'html') . ' Deadman-Switch Dashboard</h1></div><a class="btn btn-logout" href="?logout=1">Logout</a></div>';
-echo '<div class="top"><div><h3>Version 3.0 by Spaceinvader.at</h3></div></div>';
+echo '<div class="top"><div><h1>' . theme_mascot((string)($config['theme'] ?? 'light'), 'html') . ' ' . h(APP_NAME) . ' ' . h(t('nav_dashboard')) . '</h1></div><a class="btn btn-logout" href="?logout=1">' . h(t('btn_logout')) . '</a></div>';
+echo '<div class="top"><div><h3>Version ' . h(APP_VERSION) . ' by Spaceinvader.at</h3></div></div>';
 echo '</div>';
 if ($flash !== '') echo $flash;
 
 echo '<div data-tabs="dashboard-tabs">';
-echo '<div class="tabs" role="tablist" aria-label="Dashboard Bereiche">';
-echo '<button type="button" class="tab-button active" data-tab-target="tab-dashboard" aria-selected="true">Dashboard</button>';
-echo '<button type="button" class="tab-button" data-tab-target="tab-intervals" aria-selected="false">Intervalle &amp; Links</button>';
-echo '<button type="button" class="tab-button" data-tab-target="tab-messages" aria-selected="false">Nachrichten</button>';
-echo '<button type="button" class="tab-button" data-tab-target="tab-mail" aria-selected="false">Mailversand</button>';
-echo '<button type="button" class="tab-button" data-tab-target="tab-system" aria-selected="false">System</button>';
-echo '<button type="button" class="tab-button" data-tab-target="tab-logs" aria-selected="false">Logs</button>';
+echo '<div class="tabs" role="tablist" aria-label="' . h(t('aria_dashboard_areas')) . '">';
+echo '<button type="button" class="tab-button active" data-tab-target="tab-dashboard" aria-selected="true">' . h(t('nav_dashboard')) . '</button>';
+echo '<button type="button" class="tab-button" data-tab-target="tab-intervals" aria-selected="false">' . t('tab_intervals') . '</button>';
+echo '<button type="button" class="tab-button" data-tab-target="tab-messages" aria-selected="false">' . h(t('tab_messages')) . '</button>';
+echo '<button type="button" class="tab-button" data-tab-target="tab-mail" aria-selected="false">' . h(t('tab_mail')) . '</button>';
+echo '<button type="button" class="tab-button" data-tab-target="tab-system" aria-selected="false">' . h(t('tab_system')) . '</button>';
+echo '<button type="button" class="tab-button" data-tab-target="tab-logs" aria-selected="false">' . h(t('tab_logs')) . '</button>';
 echo '</div>';
 
 echo '<div class="tab-panel active" data-tab-panel="tab-dashboard">';
 echo '<div class="section-grid">';
-echo '<div class="card"><h3>System Status</h3><table>';
-echo '<tr><th>Letzter Check-in</th><td>' . h(date('d.m.Y H:i:s', (int)$config['last_checkin_at'])) . '</td></tr>';
-echo '<tr><th>Nächste Fälligkeit</th><td><span class="badge ' . ($remaining > 0 ? 'ok' : 'bad') . '">' . h(date('d.m.Y H:i:s', (int)$config['next_due_at'])) . '</span></td></tr>';
-echo '<tr><th>Intervall</th><td>' . h(format_interval((int)$config['interval_seconds'])) . '</td></tr>';
-echo '<tr><th>Restzeit</th><td>' . h(format_remaining($remaining)) . '</td></tr>';
-echo '<tr><th>Reminder ab ~20% Restzeit</th><td>' . h(date('d.m.Y H:i:s', $thresholdAt)) . ' ';
+echo '<div class="card"><h3>' . h(t('heading_system_status')) . '</h3><table>';
+echo '<tr><th>' . h(t('field_last_checkin')) . '</th><td>' . h(date('d.m.Y H:i:s', (int)$config['last_checkin_at'])) . '</td></tr>';
+echo '<tr><th>' . h(t('field_next_due')) . '</th><td><span class="badge ' . ($remaining > 0 ? 'ok' : 'bad') . '">' . h(date('d.m.Y H:i:s', (int)$config['next_due_at'])) . '</span></td></tr>';
+echo '<tr><th>' . h(t('field_interval')) . '</th><td>' . h(format_interval((int)$config['interval_seconds'])) . '</td></tr>';
+echo '<tr><th>' . h(t('field_remaining_time')) . '</th><td>' . h(format_remaining($remaining)) . '</td></tr>';
+echo '<tr><th>' . h(t('field_reminder_threshold')) . '</th><td>' . h(date('d.m.Y H:i:s', $thresholdAt)) . ' ';
 if (!empty($config['reminder_sent_this_cycle'])) {
-    echo '<span class="badge warn">bereits gesendet</span>';
+    echo '<span class="badge warn">' . h(t('badge_already_sent')) . '</span>';
 }
 echo '</td></tr>';
-echo '<tr><th>Alarm ausgelöst</th><td><span class="badge ' . $statusClass . '">' . h($statusText) . '</span>';
+echo '<tr><th>' . h(t('field_alarm_triggered')) . '</th><td><span class="badge ' . $statusClass . '">' . h($statusText) . '</span>';
 if (!empty($config['triggered_at'])) {
-    echo ' am ' . h(date('d.m.Y H:i:s', (int)$config['triggered_at']));
+    echo h(t('triggered_at_template', ['{{date}}' => date('d.m.Y H:i:s', (int)$config['triggered_at'])]));
 }
 $res = $config['last_dispatch_result'] ?? ['ok' => [], 'fail' => []];
 if (!empty($config['triggered']) && (!empty($res['ok']) || !empty($res['fail']))) {
-    echo '<div class="small muted" style="margin-top:8px">Erfolgreich: ' . count($res['ok']) . ' | Fehlgeschlagen: ' . count($res['fail']) . '</div>';
+    echo '<div class="small muted" style="margin-top:8px">' . h(t('stats_success_fail_template', ['{{ok}}' => (string)count($res['ok']), '{{fail}}' => (string)count($res['fail'])])) . '</div>';
 }
 echo '</td></tr>';
 echo '</table></div>';
-echo '<div class="card"><h3>Aktuelle Zeit</h3><div class="stats-grid"><div class="stat-card"><span class="stat-label">Aktuelle lokale Zeit</span><div class="stat-value clock-value" id="dashboard-clock">' . h(date('d.m.Y H:i:s', $now)) . '</div></div></div></div>';
+echo '<div class="card"><h3>' . h(t('heading_current_time')) . '</h3><div class="stats-grid"><div class="stat-card"><span class="stat-label">' . h(t('label_current_local_time')) . '</span><div class="stat-value clock-value" id="dashboard-clock">' . h(date('d.m.Y H:i:s', $now)) . '</div></div></div></div>';
 echo '</div>';
 echo '</div>';
 
 echo '<div class="tab-panel" data-tab-panel="tab-intervals">';
 echo '<div class="section-grid">';
-echo '<div class="card"><h3>&#128241; Dein Check-in Link</h3>';
-echo '<p class="small">Speichere diesen Link auf deinem Smartphone. Beim Öffnen wird deine 4-stellige PIN abgefragt. Jeder Klick startet das Intervall neu ab genau diesem Moment.</p>';
+echo '<div class="card"><h3>&#128241; ' . h(t('heading_checkin_link')) . '</h3>';
+echo '<p class="small">' . h(t('desc_checkin_link')) . '</p>';
 echo '<div class="code">' . h($checkinUrl) . '</div>';
 echo '<div class="btn-row">';
-echo '<div><a class="btn btn-secondary" href="' . h($checkinUrl) . '" target="_blank">Gehe zum Link (Test)</a></div>';
+echo '<div><a class="btn btn-secondary" href="' . h($checkinUrl) . '" target="_blank">' . h(t('btn_goto_link_test')) . '</a></div>';
 echo '</div></div>';
 
-echo '<div class="card"><h3>&#129302; Cronjob</h3>';
-echo '<p class="small">Richte diesen Link in einem Web-Cron-Dienst ein, ideal jede Minute oder alle 5 Minuten.</p>';
+echo '<div class="card"><h3>&#129302; ' . h(t('heading_cronjob')) . '</h3>';
+echo '<p class="small">' . h(t('desc_cronjob')) . '</p>';
 echo '<div class="code">' . h($cronUrl) . '</div>';
 echo '<div class="btn-row">';
-echo '<div><form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="run_cron_preview"><button class="btn btn-secondary" type="submit">Cron-Status-Vorschau</button></form></div>';
-echo '<div><form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="manual_checkin"><button class="btn btn-success" type="submit">Intervall jetzt neu starten</button></form></div>';
+echo '<div><form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="run_cron_preview"><button class="btn btn-secondary" type="submit">' . h(t('btn_cron_preview')) . '</button></form></div>';
+echo '<div><form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="manual_checkin"><button class="btn btn-success" type="submit">' . h(t('btn_restart_interval')) . '</button></form></div>';
 echo '</div></div>';
-echo '<div class="card span-2"><h3>⏱ Intervall ändern</h3>';
+echo '<div class="card span-2"><h3>⏱ ' . h(t('heading_change_interval')) . '</h3>';
 $ival = (int)$config['interval_seconds'];
 $days = intdiv($ival, 86400); $rem = $ival % 86400; $hours = intdiv($rem, 3600); $minutes = intdiv($rem % 3600, 60);
 echo '<form method="post" autocomplete="off" data-bwignore="true"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="save_interval">';
-echo '<div class="grid3"><div><label>Tage</label><input type="number" name="days" min="0" value="' . h((string)$days) . '" autocomplete="off" data-bwignore="true"></div><div><label>Stunden</label><input type="number" name="hours" min="0" value="' . h((string)$hours) . '" autocomplete="off" data-bwignore="true"></div><div><label>Minuten</label><input type="number" name="minutes" min="0" value="' . h((string)$minutes) . '" autocomplete="off" data-bwignore="true"></div></div>';
-echo '<p class="small muted">Beim Speichern startet das neue Intervall sofort neu.</p>';
-echo '<button type="submit">Intervall speichern</button></form></div>';
+echo '<div class="grid3"><div><label>' . h(t('label_days')) . '</label><input type="number" name="days" min="0" value="' . h((string)$days) . '" autocomplete="off" data-bwignore="true"></div><div><label>' . h(t('label_hours')) . '</label><input type="number" name="hours" min="0" value="' . h((string)$hours) . '" autocomplete="off" data-bwignore="true"></div><div><label>' . h(t('label_minutes')) . '</label><input type="number" name="minutes" min="0" value="' . h((string)$minutes) . '" autocomplete="off" data-bwignore="true"></div></div>';
+echo '<p class="small muted">' . h(t('note_interval_restart')) . '</p>';
+echo '<button type="submit">' . h(t('btn_save_interval')) . '</button></form></div>';
 echo '</div>';
 echo '</div>';
 
 echo '<div class="tab-panel" data-tab-panel="tab-messages">';
-echo '<div class="card"><h3>✏️ DMS / Adressen / Willkommensmail bearbeiten</h3>';
+echo '<div class="card"><h3>✏️ ' . h(t('heading_edit_messages')) . '</h3>';
 echo '<form method="post" autocomplete="off" data-bwignore="true">';
 echo '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="save_payload">';
-echo '<label>Empfänger (Vertrauenspersonen)</label><textarea name="recipients_csv" autocomplete="off" data-bwignore="true" required>' . h((string)($payload['recipients_csv'] ?? '')) . '</textarea>';
-echo '<label>Erinnerungs-Mailadresse</label><input type="email" name="reminder_email" value="' . h((string)($payload['reminder_email'] ?? '')) . '" autocomplete="off" data-bwignore="true" required>';
-echo '<div class="grid"><div><label>DMS-Betreff</label><input type="text" name="dms_subject" value="' . h((string)($payload['dms_subject'] ?? default_dms_subject())) . '" autocomplete="off" data-bwignore="true" required></div>';
-echo '<div><label>Willkommens-Betreff</label><input type="text" name="welcome_subject" value="' . h((string)($payload['welcome_subject'] ?? default_welcome_subject())) . '" autocomplete="off" data-bwignore="true" required></div></div>';
-echo '<label>DMS-Nachricht</label><textarea name="dms_message" autocomplete="off" data-bwignore="true" required>' . h((string)($payload['dms_message'] ?? default_dms_message())) . '</textarea>';
-echo '<label>Willkommensmail Text</label><textarea name="welcome_body" autocomplete="off" data-bwignore="true" required>' . h((string)($payload['welcome_body'] ?? default_welcome_body())) . '</textarea>';
-echo '<p class="small muted">Platzhalter: {{installed_at}}, {{system_url}}, {{interval}}, {{reminder_email}}, {{recipient_email}}</p>';
-echo '<button type="submit">Nachrichten speichern</button></form></div>';
+echo '<label>' . h(t('label_recipients')) . '</label><textarea name="recipients_csv" autocomplete="off" data-bwignore="true" required>' . h((string)($payload['recipients_csv'] ?? '')) . '</textarea>';
+echo '<label>' . h(t('label_reminder_email')) . '</label><input type="email" name="reminder_email" value="' . h((string)($payload['reminder_email'] ?? '')) . '" autocomplete="off" data-bwignore="true" required>';
+echo '<div class="grid"><div><label>' . h(t('label_dms_subject')) . '</label><input type="text" name="dms_subject" value="' . h((string)($payload['dms_subject'] ?? default_dms_subject())) . '" autocomplete="off" data-bwignore="true" required></div>';
+echo '<div><label>' . h(t('label_welcome_subject')) . '</label><input type="text" name="welcome_subject" value="' . h((string)($payload['welcome_subject'] ?? default_welcome_subject())) . '" autocomplete="off" data-bwignore="true" required></div></div>';
+echo '<label>' . h(t('label_dms_message')) . '</label><textarea name="dms_message" autocomplete="off" data-bwignore="true" required>' . h((string)($payload['dms_message'] ?? default_dms_message())) . '</textarea>';
+echo '<label>' . h(t('label_welcome_body')) . '</label><textarea name="welcome_body" autocomplete="off" data-bwignore="true" required>' . h((string)($payload['welcome_body'] ?? default_welcome_body())) . '</textarea>';
+echo '<p class="small muted">' . h(t('note_placeholders')) . '</p>';
+echo '<button type="submit">' . h(t('btn_save_messages')) . '</button></form></div>';
 echo '</div>';
 
 echo '<div class="tab-panel" data-tab-panel="tab-mail">';
-echo '<div class="card"><h3>Mailversand</h3>';
+echo '<div class="card"><h3>' . h(t('tab_mail')) . '</h3>';
 echo '<form method="post" autocomplete="off" data-bwignore="true">';
 echo '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="save_mail_settings">';
-echo '<div class="grid"><div><label>Versandmodus</label><select name="smtp_mode" autocomplete="off" data-bwignore="true"><option value="smtp"' . (((string)($payload['smtp']['mode'] ?? 'smtp')) === 'smtp' ? ' selected' : '') . '>SMTP</option><option value="mail"' . (((string)($payload['smtp']['mode'] ?? 'smtp')) === 'mail' ? ' selected' : '') . '>PHP mail()</option></select></div>';
-echo '<div><label>Sicherheit</label><select name="smtp_secure" autocomplete="off" data-bwignore="true"><option value="tls"' . (((string)($payload['smtp']['secure'] ?? 'tls')) === 'tls' ? ' selected' : '') . '>TLS / STARTTLS</option><option value="ssl"' . (((string)($payload['smtp']['secure'] ?? 'tls')) === 'ssl' ? ' selected' : '') . '>SSL</option></select></div></div>';
-echo '<div class="grid"><div><label>SMTP Host</label><input type="text" name="smtp_host" value="' . h((string)($payload['smtp']['host'] ?? '')) . '" autocomplete="off" data-bwignore="true"></div><div><label>SMTP Port</label><input type="number" name="smtp_port" value="' . h((string)($payload['smtp']['port'] ?? '587')) . '" autocomplete="off" data-bwignore="true"></div></div>';
-echo '<div class="grid"><div><label>SMTP Benutzer</label><input type="email" name="smtp_user" value="' . h((string)($payload['smtp']['user'] ?? '')) . '" autocomplete="off" data-bwignore="true"></div><div><label>SMTP Passwort</label><input type="password" name="smtp_pass" placeholder="leer lassen = unverändert" autocomplete="new-password" data-bwignore="true"></div></div>';
-echo '<label>Absenderadresse</label><input type="email" name="smtp_from" value="' . h((string)($payload['smtp']['from'] ?? '')) . '" autocomplete="off" data-bwignore="true">';
-echo '<div class="form-submit-gap"><button type="submit">Änderungen speichern</button></div></form>';
+echo '<div class="grid"><div><label>' . h(t('label_send_mode')) . '</label><select name="smtp_mode" autocomplete="off" data-bwignore="true"><option value="smtp"' . (((string)($payload['smtp']['mode'] ?? 'smtp')) === 'smtp' ? ' selected' : '') . '>SMTP</option><option value="mail"' . (((string)($payload['smtp']['mode'] ?? 'smtp')) === 'mail' ? ' selected' : '') . '>PHP mail()</option></select></div>';
+echo '<div><label>' . h(t('label_smtp_secure')) . '</label><select name="smtp_secure" autocomplete="off" data-bwignore="true"><option value="tls"' . (((string)($payload['smtp']['secure'] ?? 'tls')) === 'tls' ? ' selected' : '') . '>TLS / STARTTLS</option><option value="ssl"' . (((string)($payload['smtp']['secure'] ?? 'tls')) === 'ssl' ? ' selected' : '') . '>SSL</option></select></div></div>';
+echo '<div class="grid"><div><label>' . h(t('label_smtp_host')) . '</label><input type="text" name="smtp_host" value="' . h((string)($payload['smtp']['host'] ?? '')) . '" autocomplete="off" data-bwignore="true"></div><div><label>' . h(t('label_smtp_port')) . '</label><input type="number" name="smtp_port" value="' . h((string)($payload['smtp']['port'] ?? '587')) . '" autocomplete="off" data-bwignore="true"></div></div>';
+echo '<div class="grid"><div><label>' . h(t('label_smtp_user')) . '</label><input type="email" name="smtp_user" value="' . h((string)($payload['smtp']['user'] ?? '')) . '" autocomplete="off" data-bwignore="true"></div><div><label>' . h(t('label_smtp_pass')) . '</label><input type="password" name="smtp_pass" placeholder="' . h(t('placeholder_leave_empty_unchanged')) . '" autocomplete="new-password" data-bwignore="true"></div></div>';
+echo '<label>' . h(t('label_sender_address')) . '</label><input type="email" name="smtp_from" value="' . h((string)($payload['smtp']['from'] ?? '')) . '" autocomplete="off" data-bwignore="true">';
+echo '<div class="form-submit-gap"><button type="submit">' . h(t('btn_save_changes')) . '</button></div></form>';
 echo '<div class="grid3" style="margin-top:16px">';
-foreach ([['send_test_dms','Test-DMS senden','btn-success'],['send_test_welcome','Test-Willkommensmail senden','btn-secondary'],['send_test_reminder','Test-Erinnerung senden','btn-secondary']] as $btn) {
+foreach ([['send_test_dms', t('btn_send_test_dms'), 'btn-success'], ['send_test_welcome', t('btn_send_test_welcome'), 'btn-secondary'], ['send_test_reminder', t('btn_send_test_reminder'), 'btn-secondary']] as $btn) {
     echo '<form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="' . h($btn[0]) . '"><button type="submit" class="btn ' . h($btn[2]) . '">' . h($btn[1]) . '</button></form>';
 }
 echo '</div></div>';
 echo '</div>';
 
 echo '<div class="tab-panel" data-tab-panel="tab-system">';
-echo '<div class="card"><h3>Darstellung</h3>';
+echo '<div class="card"><h3>' . h(t('heading_appearance')) . '</h3>';
 echo '<form method="post">';
 echo '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="save_theme">';
-echo '<label>Theme</label><select name="theme"><option value="light"' . (((string)($config['theme'] ?? 'light')) === 'light' ? ' selected' : '') . '>Lightmode</option><option value="dark"' . (((string)($config['theme'] ?? 'light')) === 'dark' ? ' selected' : '') . '>Darkmode</option><option value="happy"' . (((string)($config['theme'] ?? 'light')) === 'happy' ? ' selected' : '') . '>Happy Theme</option><option value="cat"' . (((string)($config['theme'] ?? 'light')) === 'cat' ? ' selected' : '') . '>Cat Theme</option></select>';
-echo '<div class="form-submit-gap"><button type="submit">Theme speichern</button></div></form></div>';
-echo '<div class="card"><h3>Rate-Limiter</h3>';
-echo '<p class="small muted">Diese Einstellung gilt für Admin-Login, PIN-Eingabe, Captcha-Fehler und die erneute Admin-Authentifizierung nach einer Sperre. Die Sperrdauer ist intern fest gesetzt.</p>';
+echo '<label>' . h(t('label_theme')) . '</label><select name="theme"><option value="light"' . (((string)($config['theme'] ?? 'light')) === 'light' ? ' selected' : '') . '>' . h(t('theme_light')) . '</option><option value="dark"' . (((string)($config['theme'] ?? 'light')) === 'dark' ? ' selected' : '') . '>' . h(t('theme_dark')) . '</option><option value="happy"' . (((string)($config['theme'] ?? 'light')) === 'happy' ? ' selected' : '') . '>' . h(t('theme_happy')) . '</option><option value="cat"' . (((string)($config['theme'] ?? 'light')) === 'cat' ? ' selected' : '') . '>' . h(t('theme_cat')) . '</option></select>';
+echo '<div class="form-submit-gap"><button type="submit">' . h(t('btn_save_theme')) . '</button></div></form></div>';
+echo '<div class="card"><h3>' . h(t('heading_language')) . '</h3>';
+echo '<p class="small muted">' . h(t('desc_language')) . '</p>';
+echo '<form method="post">';
+echo '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="save_language">';
+$currentLang = current_language();
+echo '<label>' . h(t('heading_language')) . '</label><select name="language"><option value="de"' . ($currentLang === 'de' ? ' selected' : '') . '>' . h(t('lang_option_de')) . '</option><option value="en"' . ($currentLang === 'en' ? ' selected' : '') . '>' . h(t('lang_option_en')) . '</option></select>';
+echo '<div class="form-submit-gap"><button type="submit">' . h(t('btn_save_language')) . '</button></div></form></div>';
+echo '<div class="card"><h3>' . h(t('heading_rate_limiter')) . '</h3>';
+echo '<p class="small muted">' . h(t('desc_rate_limiter')) . '</p>';
 echo '<form method="post">';
 echo '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="save_rate_limit">';
-echo '<label>Fehlversuche bis zur Sperre</label><input type="number" name="rate_limit_max_failures" min="1" max="50" value="' . h((string)rate_limit_max_failures($config)) . '" required>';
-echo '<div class="form-submit-gap"><button type="submit">Rate-Limiter speichern</button></div></form></div>';
-echo '<div class="card"><h3>Sicherheit</h3>';
-echo '<p class="small muted">Hier kannst du das Admin-Passwort und die 4-stellige Check-in-PIN ändern. Zur Bestätigung ist immer das aktuelle Admin-Passwort erforderlich.</p>';
+echo '<label>' . h(t('label_max_failures')) . '</label><input type="number" name="rate_limit_max_failures" min="1" max="50" value="' . h((string)rate_limit_max_failures($config)) . '" required>';
+echo '<div class="form-submit-gap"><button type="submit">' . h(t('btn_save_rate_limit')) . '</button></div></form></div>';
+echo '<div class="card"><h3>' . h(t('heading_security')) . '</h3>';
+echo '<p class="small muted">' . h(t('desc_security_card')) . '</p>';
 echo '<form method="post" autocomplete="off" data-bwignore="true">';
 echo '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="save_security">';
-echo '<label>Aktuelles Admin-Passwort</label><input type="password" name="current_admin_password" autocomplete="off" data-bwignore="true" required>';
-echo '<div class="grid"><div><label>Neues Admin-Passwort</label><input type="password" name="new_admin_password" placeholder="mindestens 12 Zeichen" autocomplete="new-password" data-bwignore="true"></div><div><label>Neues Admin-Passwort bestätigen</label><input type="password" name="new_admin_password_confirm" autocomplete="new-password" data-bwignore="true"></div></div>';
-echo '<div class="grid"><div><label>Neue Check-in PIN</label><input type="text" name="new_pin" pattern="\d{4}" maxlength="4" placeholder="1234" inputmode="numeric" autocomplete="off" data-bwignore="true"></div><div><label>Neue PIN bestätigen</label><input type="text" name="new_pin_confirm" pattern="\d{4}" maxlength="4" placeholder="1234" inputmode="numeric" autocomplete="off" data-bwignore="true"></div></div>';
-echo '<div class="form-submit-gap"><button type="submit">Sicherheitsdaten speichern</button></div></form></div>';
-echo '<div class="card danger-card"><h3>&#128736; System-Aktionen</h3><div class="grid">';
-echo '<div><form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="reset_all"><button type="submit" class="btn btn-danger" onclick="return confirm(\'Wirklich alles löschen?\')">System zurücksetzen</button></form></div>';
+echo '<label>' . h(t('label_current_admin_password')) . '</label><input type="password" name="current_admin_password" autocomplete="off" data-bwignore="true" required>';
+echo '<div class="grid"><div><label>' . h(t('label_new_admin_password')) . '</label><input type="password" name="new_admin_password" placeholder="' . h(t('placeholder_min_12_chars')) . '" autocomplete="new-password" data-bwignore="true"></div><div><label>' . h(t('label_new_admin_password_confirm')) . '</label><input type="password" name="new_admin_password_confirm" autocomplete="new-password" data-bwignore="true"></div></div>';
+echo '<div class="grid"><div><label>' . h(t('label_new_pin')) . '</label><input type="text" name="new_pin" pattern="\d{4}" maxlength="4" placeholder="1234" inputmode="numeric" autocomplete="off" data-bwignore="true"></div><div><label>' . h(t('label_new_pin_confirm')) . '</label><input type="text" name="new_pin_confirm" pattern="\d{4}" maxlength="4" placeholder="1234" inputmode="numeric" autocomplete="off" data-bwignore="true"></div></div>';
+echo '<div class="form-submit-gap"><button type="submit">' . h(t('btn_save_security')) . '</button></div></form></div>';
+echo '<div class="card danger-card"><h3>&#128736; ' . h(t('heading_system_actions')) . '</h3><div class="grid">';
+echo '<div><form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="reset_all"><button type="submit" class="btn btn-danger" onclick="return confirm(\'' . h(t('confirm_reset_system')) . '\')">' . h(t('btn_reset_system')) . '</button></form></div>';
 echo '</div></div>';
 echo '</div>';
 echo '<div class="tab-panel" data-tab-panel="tab-logs">';
-echo '<div class="card"><h3>Logs</h3>';
-echo '<p class="small muted">Anzeige der letzten Einträge aus der events.log.</p>';
+echo '<div class="card"><h3>' . h(t('heading_logs')) . '</h3>';
+echo '<p class="small muted">' . h(t('desc_logs')) . '</p>';
 $activeLogFilter = normalize_log_filter((string)($_GET['filter'] ?? 'all'));
 $activeLogQuery = normalize_log_query((string)($_GET['query'] ?? ''));
 echo '<div class="logs-toolbar">';
-echo '<div class="filter-wrap"><label for="logs-filter" style="margin:0">Filter</label><select id="logs-filter" data-logs-filter-select data-logs-refresh-button="logs-refresh">';
+echo '<div class="filter-wrap"><label for="logs-filter" style="margin:0">' . h(t('label_filter')) . '</label><select id="logs-filter" data-logs-filter-select data-logs-refresh-button="logs-refresh">';
 foreach (log_filter_options() as $filterValue => $filterLabel) {
     echo '<option value="' . h($filterValue) . '"' . ($activeLogFilter === $filterValue ? ' selected' : '') . '>' . h($filterLabel) . '</option>';
 }
 echo '</select>';
-echo '<input id="logs-query" class="search-input" type="text" value="' . h($activeLogQuery) . '" placeholder="Logs durchsuchen" data-logs-query-input data-logs-refresh-button="logs-refresh">';
+echo '<input id="logs-query" class="search-input" type="text" value="' . h($activeLogQuery) . '" placeholder="' . h(t('placeholder_search_logs')) . '" data-logs-query-input data-logs-refresh-button="logs-refresh">';
 echo '</div>';
-echo '<button id="logs-refresh" type="button" class="captcha-refresh" data-logs-refresh="logs-output" data-logs-filter="logs-filter" data-logs-query="logs-query" aria-label="Logs aktualisieren" title="Logs aktualisieren">🔄</button></div>';
+echo '<button id="logs-refresh" type="button" class="captcha-refresh" data-logs-refresh="logs-output" data-logs-filter="logs-filter" data-logs-query="logs-query" aria-label="' . h(t('label_refresh_logs')) . '" title="' . h(t('label_refresh_logs')) . '">🔄</button></div>';
 echo '<pre id="logs-output" class="code" style="white-space:pre-wrap;max-height:70vh;overflow:auto;margin:0">' . h(read_events_log(300, $activeLogFilter, $activeLogQuery)) . '</pre>';
 echo '<form method="post" autocomplete="off" data-bwignore="true" style="margin-top:20px">';
 echo '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="clear_logs">';
-echo '<label>Aktuelles Admin-Passwort</label><input type="password" name="current_admin_password" autocomplete="off" data-bwignore="true" required>';
-echo '<div class="form-submit-gap"><button type="submit" class="btn btn-danger" onclick="return confirm(\'Wirklich alle Logs löschen?\')">Logs löschen</button></div></form>';
+echo '<label>' . h(t('label_current_admin_password')) . '</label><input type="password" name="current_admin_password" autocomplete="off" data-bwignore="true" required>';
+echo '<div class="form-submit-gap"><button type="submit" class="btn btn-danger" onclick="return confirm(\'' . h(t('confirm_clear_logs')) . '\')">' . h(t('btn_clear_logs')) . '</button></div></form>';
 echo '</div>';
 echo '</div>';
 echo '</div></div>';
