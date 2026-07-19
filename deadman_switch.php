@@ -335,6 +335,11 @@ function translations(): array
             'label_admin_password' => 'Admin-Passwort',
             'label_checkin_pin' => 'Check-in PIN (4-stellig)',
             'setup_password_note' => 'Das Admin-Passwort muss mindestens 12 Zeichen sowie Gross-/Kleinbuchstaben, Zahl und Sonderzeichen enthalten.',
+            'pw_req_length' => 'Mindestens 12 Zeichen',
+            'pw_req_lower' => 'Kleinbuchstabe',
+            'pw_req_upper' => 'Großbuchstabe',
+            'pw_req_digit' => 'Zahl',
+            'pw_req_special' => 'Sonderzeichen',
             'setup_step2_title' => '2. Intervall',
             'setup_interval_note' => 'Jeder Check-in startet dieses Intervall neu ab genau dem Klick-Zeitpunkt.',
             'setup_step3_title' => '3. Adressen und Inhalte',
@@ -550,6 +555,11 @@ function translations(): array
             'label_admin_password' => 'Admin Password',
             'label_checkin_pin' => 'Check-in PIN (4 digits)',
             'setup_password_note' => 'The admin password must be at least 12 characters and contain upper/lowercase letters, a digit, and a special character.',
+            'pw_req_length' => 'At least 12 characters',
+            'pw_req_lower' => 'Lowercase letter',
+            'pw_req_upper' => 'Uppercase letter',
+            'pw_req_digit' => 'Digit',
+            'pw_req_special' => 'Special character',
             'setup_step2_title' => '2. Interval',
             'setup_interval_note' => 'Every check-in restarts this interval from the exact moment of the click.',
             'setup_step3_title' => '3. Addresses and Content',
@@ -2098,6 +2108,9 @@ function render_header(string $title, string $theme = 'light'): void
         .auth-row > div{min-width:0}
         .pin-input{width:100%;font-size:2rem;text-align:center;letter-spacing:10px;-webkit-text-security:disc}
         .pin-button{width:100%}
+        .pw-requirements{list-style:none;display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0;padding:0;font-size:.82rem}
+        .pw-requirements li{padding:4px 10px;border-radius:999px;background:var(--bad);color:var(--badtxt);transition:background .15s ease,color .15s ease}
+        .pw-requirements li.met{background:var(--ok);color:var(--oktxt)}
         .captcha-box{display:flex;justify-content:center;margin:0 0 12px}
         .captcha-box img{display:block;width:100%;height:52px;object-fit:cover;border-radius:16px;border:1px solid rgba(148,163,184,.28);background:rgba(255,255,255,.72)}
         .captcha-compact{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:12px;align-items:end}
@@ -2209,6 +2222,28 @@ function render_footer(): void
             activate(hasStoredPanel ? initial : buttons[0].getAttribute("data-tab-target"));
         }
     });
+    var pwInput = document.getElementById("setup-admin-password");
+    var pwList = document.getElementById("setup-password-requirements");
+    if (pwInput && pwList) {
+        var pwRules = {
+            length: function(v){ return v.length >= 12; },
+            lower: function(v){ return /[a-z]/.test(v); },
+            upper: function(v){ return /[A-Z]/.test(v); },
+            digit: function(v){ return /\d/.test(v); },
+            special: function(v){ return /[^a-zA-Z0-9]/.test(v); }
+        };
+        var pwItems = pwList.querySelectorAll("[data-rule]");
+        var updatePwRequirements = function(){
+            var value = pwInput.value;
+            pwItems.forEach(function(item){
+                var rule = item.getAttribute("data-rule");
+                var ok = pwRules[rule] ? pwRules[rule](value) : false;
+                item.classList.toggle("met", ok);
+            });
+        };
+        pwInput.addEventListener("input", updatePwRequirements);
+        updatePwRequirements();
+    }
     var clock = document.getElementById("dashboard-clock");
     if (clock) {
         var clockLocale = "' . (current_language() === 'en' ? 'en-GB' : 'de-AT') . '";
@@ -2430,6 +2465,21 @@ if (!$isCli && route_suffix() === '/checkin') {
 
 if (!$config) {
     $msg = '';
+    $days = 1;
+    $hours = 0;
+    $minutes = 0;
+    $recipientsCsv = '';
+    $reminderEmail = '';
+    $dmsSubject = default_dms_subject();
+    $dmsMessage = default_dms_message();
+    $welcomeSubject = default_welcome_subject();
+    $welcomeBody = default_welcome_body();
+    $smtpMode = 'smtp';
+    $smtpHost = 'mail.gmx.net';
+    $smtpPort = 587;
+    $smtpUser = '';
+    $smtpFrom = '';
+    $smtpSecure = 'tls';
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_csrf();
         $password = (string)($_POST['password'] ?? '');
@@ -2530,36 +2580,44 @@ if (!$config) {
     echo '<form method="post" autocomplete="off" data-bwignore="true">';
     echo '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '">';
     echo '<h3>' . h(t('setup_step1_title')) . '</h3><div class="grid">';
-    echo '<div><label>' . h(t('label_admin_password')) . '</label><input type="password" name="password" autocomplete="new-password" data-bwignore="true" required></div>';
+    $pwPattern = '(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z0-9]).{12,}';
+    echo '<div><label>' . h(t('label_admin_password')) . '</label><input type="password" id="setup-admin-password" name="password" autocomplete="new-password" data-bwignore="true" minlength="12" pattern="' . h($pwPattern) . '" title="' . h(t('setup_password_note')) . '" required>';
+    echo '<ul class="pw-requirements" id="setup-password-requirements">';
+    echo '<li data-rule="length">' . h(t('pw_req_length')) . '</li>';
+    echo '<li data-rule="lower">' . h(t('pw_req_lower')) . '</li>';
+    echo '<li data-rule="upper">' . h(t('pw_req_upper')) . '</li>';
+    echo '<li data-rule="digit">' . h(t('pw_req_digit')) . '</li>';
+    echo '<li data-rule="special">' . h(t('pw_req_special')) . '</li>';
+    echo '</ul></div>';
     echo '<div><label>' . h(t('label_checkin_pin')) . '</label><input type="text" name="pin" pattern="\d{4}" maxlength="4" inputmode="numeric" autocomplete="off" data-bwignore="true" required></div>';
     echo '</div>';
     echo '<p class="small muted">' . h(t('setup_password_note')) . '</p>';
 
     echo '<h3>' . h(t('setup_step2_title')) . '</h3><div class="grid3">';
-    echo '<div><label>' . h(t('label_days')) . '</label><input type="number" name="days" min="0" value="1" autocomplete="off" data-bwignore="true"></div>';
-    echo '<div><label>' . h(t('label_hours')) . '</label><input type="number" name="hours" min="0" value="0" autocomplete="off" data-bwignore="true"></div>';
-    echo '<div><label>' . h(t('label_minutes')) . '</label><input type="number" name="minutes" min="0" value="0" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_days')) . '</label><input type="number" name="days" min="0" value="' . h((string)$days) . '" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_hours')) . '</label><input type="number" name="hours" min="0" value="' . h((string)$hours) . '" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_minutes')) . '</label><input type="number" name="minutes" min="0" value="' . h((string)$minutes) . '" autocomplete="off" data-bwignore="true"></div>';
     echo '</div><p class="small muted">' . h(t('setup_interval_note')) . '</p>';
 
     echo '<h3>' . h(t('setup_step3_title')) . '</h3>';
-    echo '<label>' . h(t('label_recipients_setup')) . '</label><textarea name="recipients_csv" autocomplete="off" data-bwignore="true" required></textarea>';
-    echo '<label>' . h(t('label_reminder_email_setup')) . '</label><input type="email" name="reminder_email" autocomplete="off" data-bwignore="true" required>';
-    echo '<label>' . h(t('label_dms_subject')) . '</label><input type="text" name="dms_subject" value="' . h(default_dms_subject()) . '" autocomplete="off" data-bwignore="true" required>';
-    echo '<label>' . h(t('label_dms_message')) . '</label><textarea name="dms_message" autocomplete="off" data-bwignore="true" required>' . h(default_dms_message()) . '</textarea>';
-    echo '<label>' . h(t('label_welcome_subject')) . '</label><input type="text" name="welcome_subject" value="' . h(default_welcome_subject()) . '" autocomplete="off" data-bwignore="true" required>';
-    echo '<label>' . h(t('label_welcome_body')) . '</label><textarea name="welcome_body" autocomplete="off" data-bwignore="true" required>' . h(default_welcome_body()) . '</textarea>';
+    echo '<label>' . h(t('label_recipients_setup')) . '</label><textarea name="recipients_csv" autocomplete="off" data-bwignore="true" required>' . h($recipientsCsv) . '</textarea>';
+    echo '<label>' . h(t('label_reminder_email_setup')) . '</label><input type="email" name="reminder_email" value="' . h($reminderEmail) . '" autocomplete="off" data-bwignore="true" required>';
+    echo '<label>' . h(t('label_dms_subject')) . '</label><input type="text" name="dms_subject" value="' . h($dmsSubject) . '" autocomplete="off" data-bwignore="true" required>';
+    echo '<label>' . h(t('label_dms_message')) . '</label><textarea name="dms_message" autocomplete="off" data-bwignore="true" required>' . h($dmsMessage) . '</textarea>';
+    echo '<label>' . h(t('label_welcome_subject')) . '</label><input type="text" name="welcome_subject" value="' . h($welcomeSubject) . '" autocomplete="off" data-bwignore="true" required>';
+    echo '<label>' . h(t('label_welcome_body')) . '</label><textarea name="welcome_body" autocomplete="off" data-bwignore="true" required>' . h($welcomeBody) . '</textarea>';
     echo '<p class="small muted">' . h(t('note_placeholders')) . '</p>';
 
     echo '<h3>' . h(t('setup_step4_title')) . '</h3><div class="grid">';
-    echo '<div><label>' . h(t('label_send_mode')) . '</label><select name="smtp_mode" autocomplete="off" data-bwignore="true"><option value="smtp">SMTP</option><option value="mail">PHP mail()</option></select></div>';
-    echo '<div><label>' . h(t('label_smtp_secure')) . '</label><select name="smtp_secure" autocomplete="off" data-bwignore="true"><option value="tls">TLS / STARTTLS</option><option value="ssl">SSL</option></select></div>';
+    echo '<div><label>' . h(t('label_send_mode')) . '</label><select name="smtp_mode" autocomplete="off" data-bwignore="true"><option value="smtp"' . ($smtpMode === 'smtp' ? ' selected' : '') . '>SMTP</option><option value="mail"' . ($smtpMode === 'mail' ? ' selected' : '') . '>PHP mail()</option></select></div>';
+    echo '<div><label>' . h(t('label_smtp_secure')) . '</label><select name="smtp_secure" autocomplete="off" data-bwignore="true"><option value="tls"' . ($smtpSecure === 'tls' ? ' selected' : '') . '>TLS / STARTTLS</option><option value="ssl"' . ($smtpSecure === 'ssl' ? ' selected' : '') . '>SSL</option></select></div>';
     echo '</div><div class="grid">';
-    echo '<div><label>' . h(t('label_smtp_host')) . '</label><input type="text" name="smtp_host" value="mail.gmx.net" autocomplete="off" data-bwignore="true"></div>';
-    echo '<div><label>' . h(t('label_smtp_port')) . '</label><input type="number" name="smtp_port" value="587" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_smtp_host')) . '</label><input type="text" name="smtp_host" value="' . h($smtpHost) . '" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_smtp_port')) . '</label><input type="number" name="smtp_port" value="' . h((string)$smtpPort) . '" autocomplete="off" data-bwignore="true"></div>';
     echo '</div><div class="grid">';
-    echo '<div><label>' . h(t('label_smtp_user')) . '</label><input type="email" name="smtp_user" autocomplete="off" data-bwignore="true"></div>';
+    echo '<div><label>' . h(t('label_smtp_user')) . '</label><input type="email" name="smtp_user" value="' . h($smtpUser) . '" autocomplete="off" data-bwignore="true"></div>';
     echo '<div><label>' . h(t('label_smtp_pass_setup')) . '</label><input type="password" name="smtp_pass" autocomplete="new-password" data-bwignore="true"></div>';
-    echo '</div><label>' . h(t('label_sender_address')) . '</label><input type="email" name="smtp_from" autocomplete="off" data-bwignore="true">';
+    echo '</div><label>' . h(t('label_sender_address')) . '</label><input type="email" name="smtp_from" value="' . h($smtpFrom) . '" autocomplete="off" data-bwignore="true">';
 
     echo '<button type="submit">' . h(t('btn_finish_setup')) . '</button>';
     echo '</form></div></div>';
@@ -2611,6 +2669,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'manual_checkin') {
         complete_manual_checkin($config);
+        log_event('Interval manually restarted via dashboard by admin');
         $flash = '<div class="alert alert-ok">' . h(t('flash_interval_restarted')) . '</div>';
     }
 
@@ -2624,6 +2683,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             $config['interval_seconds'] = $interval;
             complete_manual_checkin($config);
+            log_event('Interval changed via dashboard by admin. new_interval_seconds=' . $interval);
             $flash = '<div class="alert alert-ok">' . h(t('flash_interval_saved')) . '</div>';
         }
     }
@@ -2632,6 +2692,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $theme = normalize_theme((string)($_POST['theme'] ?? 'light'));
         $config['theme'] = $theme;
         write_config($config);
+        log_event('Theme changed via dashboard by admin. theme=' . $theme);
         $flash = '<div class="alert alert-ok">' . h(t('flash_theme_saved')) . '</div>';
     }
 
@@ -2641,6 +2702,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $config['language'] = $language;
         write_config($config);
         set_current_language($config);
+        log_event('Language changed via dashboard by admin. language=' . $language);
         $flash = '<div class="alert alert-ok">' . h(t('flash_language_saved')) . '</div>';
     }
 
@@ -2648,6 +2710,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $maxFailures = max(1, min(50, (int)($_POST['rate_limit_max_failures'] ?? PIN_MAX_FAILURES)));
         $config['rate_limit_max_failures'] = $maxFailures;
         write_config($config);
+        log_event('Rate limiter settings changed via dashboard by admin. max_failures=' . $maxFailures);
         $flash = '<div class="alert alert-ok">' . h(t('flash_rate_limit_saved')) . '</div>';
     }
 
@@ -2750,6 +2813,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ];
             $config['encrypted_payload'] = encrypt_payload($payload);
             write_config($config);
+            log_event('Recipients, messages and mail delivery settings updated via dashboard by admin');
             $flash = '<div class="alert alert-ok">' . h(t('flash_payload_saved')) . '</div>';
         }
     }
@@ -2780,6 +2844,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ];
             $config['encrypted_payload'] = encrypt_payload($payload);
             write_config($config);
+            log_event('Mail delivery settings changed via dashboard by admin');
             $flash = '<div class="alert alert-ok">' . h(t('flash_mail_settings_saved')) . '</div>';
         }
     }
@@ -2834,6 +2899,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     if ($action === 'reset_all') {
+        log_event('System reset via dashboard by admin');
         safe_unlink(CONFIG_FILE);
         safe_unlink(KEY_FILE);
         safe_unlink(RATE_LIMIT_FILE);
