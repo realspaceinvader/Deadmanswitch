@@ -20,6 +20,7 @@ const CHECKIN_SESSION_TTL_SECONDS = 259200;
 const SESSION_COOKIE_TTL_SECONDS = CHECKIN_SESSION_TTL_SECONDS;
 const PIN_MAX_FAILURES = 5;
 const RATE_LIMIT_BLOCK_SECONDS = 900;
+const LOG_MAX_BYTES = 2097152;
 
 ini_set('session.use_only_cookies', '1');
 ini_set('session.use_strict_mode', '1');
@@ -245,6 +246,9 @@ function translations(): array
             'aria_dashboard_areas' => 'Dashboard Bereiche',
             'btn_logout' => 'Logout',
             'heading_system_status' => 'System Status',
+            'field_previous_login' => 'Letzter Login',
+            'previous_login_template' => '{{date}} von {{ip}}',
+            'previous_login_none' => 'Noch keine früheren Logins erfasst',
             'field_last_checkin' => 'Letzter Check-in',
             'field_next_due' => 'Nächste Fälligkeit',
             'field_interval' => 'Intervall',
@@ -465,6 +469,9 @@ function translations(): array
             'aria_dashboard_areas' => 'Dashboard sections',
             'btn_logout' => 'Logout',
             'heading_system_status' => 'System Status',
+            'field_previous_login' => 'Last Login',
+            'previous_login_template' => '{{date}} from {{ip}}',
+            'previous_login_none' => 'No earlier logins recorded yet',
             'field_last_checkin' => 'Last check-in',
             'field_next_due' => 'Next due',
             'field_interval' => 'Interval',
@@ -874,9 +881,46 @@ function log_event(string $message): void
         require_data_dir_ready();
         write_file_strict(LOG_FILE, '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL, FILE_APPEND);
         safe_chmod(LOG_FILE, 0600);
+        rotate_log_if_needed();
     } catch (Throwable $e) {
         add_diag($e->getMessage());
     }
+}
+
+function rotate_log_if_needed(): void
+{
+    if (!file_exists(LOG_FILE)) {
+        return;
+    }
+    clearstatcache(true, LOG_FILE);
+    $size = filesize(LOG_FILE);
+    if ($size === false || $size <= LOG_MAX_BYTES) {
+        return;
+    }
+
+    $content = read_file_strict(LOG_FILE);
+    $lines = preg_split('/\r\n|\r|\n/', rtrim($content));
+    if (!is_array($lines)) {
+        return;
+    }
+
+    $targetBytes = intdiv(LOG_MAX_BYTES, 2);
+    $kept = [];
+    $bytes = 0;
+    for ($i = count($lines) - 1; $i >= 0; $i--) {
+        $lineBytes = strlen($lines[$i]) + 1;
+        if ($bytes + $lineBytes > $targetBytes && $kept) {
+            break;
+        }
+        $kept[] = $lines[$i];
+        $bytes += $lineBytes;
+    }
+    $kept = array_reverse($kept);
+
+    $header = '[' . date('Y-m-d H:i:s') . '] Log rotated: older entries removed to limit file size (max ' . LOG_MAX_BYTES . ' bytes).';
+    $newContent = $header . PHP_EOL . implode(PHP_EOL, $kept) . PHP_EOL;
+    write_file_strict(LOG_FILE, $newContent, 0);
+    safe_chmod(LOG_FILE, 0600);
 }
 
 function get_master_key(): string
@@ -1210,7 +1254,7 @@ function handle_admin_login_attempt(array $config, string $ip): array
 
     if (!login_allowed($ip)) {
         apply_failure_delay_for_attempt(rate_limit_max_failures($config));
-        log_event('Admin login failure');
+        log_event('Admin login failure. ip=' . $ip);
         return ['success' => false, 'error' => t('err_unauthorized_logged')];
     }
 
@@ -1224,11 +1268,11 @@ function handle_admin_login_attempt(array $config, string $ip): array
         if (($rateState['triggered'] ?? false) === true) {
             send_admin_lockout_notification($config, $ip);
             apply_failure_delay_for_attempt(rate_limit_max_failures($config));
-            log_event('Admin login failure');
+            log_event('Admin login failure. ip=' . $ip);
             return ['success' => false, 'error' => t('err_unauthorized_logged')];
         }
         apply_failure_delay_for_attempt($attempt);
-        log_event('Admin login failure');
+        log_event('Admin login failure. ip=' . $ip);
         return ['success' => false, 'error' => delay_message($attempt)];
     }
 
@@ -1236,7 +1280,12 @@ function handle_admin_login_attempt(array $config, string $ip): array
     clear_login_failures($ip);
     clear_checkin_failures($ip);
     reset_pin_state();
-    log_event('Admin login success');
+    $config['previous_login_at'] = $config['last_login_at'] ?? null;
+    $config['previous_login_ip'] = $config['last_login_ip'] ?? null;
+    $config['last_login_at'] = time();
+    $config['last_login_ip'] = $ip;
+    write_config($config);
+    log_event('Admin login success. ip=' . $ip);
     return ['success' => true, 'error' => ''];
 }
 
@@ -1860,7 +1909,7 @@ function send_admin_lockout_notification(array $config, string $ip): void
     $payload = decrypt_payload((string)($config['encrypted_payload'] ?? ''));
     $recipient = trim((string)($payload['reminder_email'] ?? ''));
     if ($recipient === '' || !filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
-        log_event('Admin login lockout notification skipped');
+        log_event('Admin login lockout notification skipped. ip=' . $ip);
         return;
     }
 
@@ -1873,10 +1922,10 @@ function send_admin_lockout_notification(array $config, string $ip): void
 
     $result = send_mail_any($recipient, $subject, $body, $payload);
     if ($result === true) {
-        log_event('Admin login lockout notification sent');
+        log_event('Admin login lockout notification sent. ip=' . $ip);
         return;
     }
-    log_event('Admin login lockout notification failed');
+    log_event('Admin login lockout notification failed. ip=' . $ip);
 }
 
 function send_welcome_mails(array $config, array $payload): array
@@ -2379,7 +2428,7 @@ if (!$isCli && route_suffix() === '/checkin') {
             force_checkin_reauthentication();
             $_SESSION['checkin_reauth_required'] = true;
             $error = t('err_reauth_required');
-            log_event('Check-in failure');
+            log_event('Check-in failure. ip=' . $ip);
         } elseif (!verify_captcha('checkin', $captcha)) {
             record_checkin_failure($ip, $config);
             $pinState = record_pin_failure($config);
@@ -2392,7 +2441,7 @@ if (!$isCli && route_suffix() === '/checkin') {
             } else {
                 $error = delay_message($attempt);
             }
-            log_event('Check-in failure');
+            log_event('Check-in failure. ip=' . $ip);
         } elseif (!preg_match('/^\d{4}$/', $pin)) {
             record_checkin_failure($ip, $config);
             $pinState = record_pin_failure($config);
@@ -2405,20 +2454,20 @@ if (!$isCli && route_suffix() === '/checkin') {
             } else {
                 $error = delay_message($attempt);
             }
-            log_event('Check-in failure');
+            log_event('Check-in failure. ip=' . $ip);
         } elseif (password_verify($pin, (string)$config['pin_hash'])) {
             reset_pin_state();
             clear_checkin_failures($ip);
             unset($_SESSION['checkin_reauth_required']);
             complete_manual_checkin($config);
-            log_event('Check-in success');
+            log_event('Check-in success. ip=' . $ip);
             $success = true;
         } else {
             record_checkin_failure($ip, $config);
             $pinState = record_pin_failure($config);
             $attempt = max(1, (int)($pinState['failures'] ?? 1));
             apply_failure_delay_for_attempt($attempt);
-            log_event('Check-in failure');
+            log_event('Check-in failure. ip=' . $ip);
             if ((int)$pinState['failures'] >= rate_limit_max_failures($config) || !checkin_allowed($ip)) {
                 force_checkin_reauthentication();
                 $_SESSION['checkin_reauth_required'] = true;
@@ -2564,7 +2613,7 @@ if (!$config) {
                     throw new RuntimeException(t('err_config_not_found_after_write') . ' ' . CONFIG_FILE);
                 }
                 $welcomeResult = send_welcome_mails($cfg, $payload);
-                log_event('System installed. Welcome mails ok=' . count($welcomeResult['ok']) . ' fail=' . count($welcomeResult['fail']));
+                log_event('System installed. Welcome mails ok=' . count($welcomeResult['ok']) . ' fail=' . count($welcomeResult['fail']) . ' ip=' . client_ip());
                 $_SESSION['setup_notice'] = t('setup_notice_template', ['{{ok}}' => (string)count($welcomeResult['ok']), '{{fail}}' => (string)count($welcomeResult['fail'])]);
                 header('Location: ' . safe_self_path());
                 exit;
@@ -2675,7 +2724,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'manual_checkin') {
         complete_manual_checkin($config);
-        log_event('Interval manually restarted via dashboard by admin');
+        log_event('Interval manually restarted via dashboard by admin. ip=' . $ip);
         $flash = '<div class="alert alert-ok">' . h(t('flash_interval_restarted')) . '</div>';
     }
 
@@ -2687,36 +2736,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($interval < 60) {
             $flash = '<div class="alert alert-bad">' . h(t('err_interval_min')) . '</div>';
         } else {
+            $oldInterval = (int)($config['interval_seconds'] ?? 0);
             $config['interval_seconds'] = $interval;
             complete_manual_checkin($config);
-            log_event('Interval changed via dashboard by admin. new_interval_seconds=' . $interval);
+            log_event('Interval changed via dashboard by admin. old_interval_seconds=' . $oldInterval . ' new_interval_seconds=' . $interval . ' ip=' . $ip);
             $flash = '<div class="alert alert-ok">' . h(t('flash_interval_saved')) . '</div>';
         }
     }
 
     if ($action === 'save_theme') {
+        $oldTheme = (string)($config['theme'] ?? 'light');
         $theme = normalize_theme((string)($_POST['theme'] ?? 'light'));
         $config['theme'] = $theme;
         write_config($config);
-        log_event('Theme changed via dashboard by admin. theme=' . $theme);
+        log_event('Theme changed via dashboard by admin. old_theme=' . $oldTheme . ' new_theme=' . $theme . ' ip=' . $ip);
         $flash = '<div class="alert alert-ok">' . h(t('flash_theme_saved')) . '</div>';
     }
 
     if ($action === 'save_language') {
+        $oldLanguage = (string)($config['language'] ?? 'de');
         $language = (string)($_POST['language'] ?? 'de');
         $language = in_array($language, ['de', 'en'], true) ? $language : 'de';
         $config['language'] = $language;
         write_config($config);
         set_current_language($config);
-        log_event('Language changed via dashboard by admin. language=' . $language);
+        log_event('Language changed via dashboard by admin. old_language=' . $oldLanguage . ' new_language=' . $language . ' ip=' . $ip);
         $flash = '<div class="alert alert-ok">' . h(t('flash_language_saved')) . '</div>';
     }
 
     if ($action === 'save_rate_limit') {
+        $oldMaxFailures = (int)($config['rate_limit_max_failures'] ?? PIN_MAX_FAILURES);
         $maxFailures = max(1, min(50, (int)($_POST['rate_limit_max_failures'] ?? PIN_MAX_FAILURES)));
         $config['rate_limit_max_failures'] = $maxFailures;
         write_config($config);
-        log_event('Rate limiter settings changed via dashboard by admin. max_failures=' . $maxFailures);
+        log_event('Rate limiter settings changed via dashboard by admin. old_max_failures=' . $oldMaxFailures . ' new_max_failures=' . $maxFailures . ' ip=' . $ip);
         $flash = '<div class="alert alert-ok">' . h(t('flash_rate_limit_saved')) . '</div>';
     }
 
@@ -2769,7 +2822,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 reset_pin_state();
             }
             write_config($config);
-            log_event('Security credentials updated via dashboard');
+            log_event('Security credentials updated via dashboard. ip=' . $ip);
             $parts = [];
             if ($changeAdminPassword) $parts[] = t('field_admin_password_short');
             if ($changePin) $parts[] = t('field_pin_short');
@@ -2802,6 +2855,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($errors) {
             $flash = '<div class="alert alert-bad">' . implode('<br>', array_map('h', $errors)) . '</div>';
         } else {
+            $oldRecipients = parse_emails((string)($payload['recipients_csv'] ?? ''));
+            $newRecipients = parse_emails($recipientsCsv);
+            $addedRecipients = array_diff($newRecipients, $oldRecipients);
+            $removedRecipients = array_diff($oldRecipients, $newRecipients);
+            $oldReminderEmail = (string)($payload['reminder_email'] ?? '');
+
+            $changedFields = [];
+            if ($dmsSubject !== (string)($payload['dms_subject'] ?? '')) $changedFields[] = 'dms_subject';
+            if ($dmsMessage !== (string)($payload['dms_message'] ?? '')) $changedFields[] = 'dms_message';
+            if ($welcomeSubject !== (string)($payload['welcome_subject'] ?? '')) $changedFields[] = 'welcome_subject';
+            if ($welcomeBody !== (string)($payload['welcome_body'] ?? '')) $changedFields[] = 'welcome_body';
+            if ($smtpMode !== (string)($payload['smtp']['mode'] ?? '')) $changedFields[] = 'smtp_mode';
+            if ($smtpHost !== (string)($payload['smtp']['host'] ?? '')) $changedFields[] = 'smtp_host';
+            if ($smtpPort !== (int)($payload['smtp']['port'] ?? 0)) $changedFields[] = 'smtp_port';
+            if ($smtpUser !== (string)($payload['smtp']['user'] ?? '')) $changedFields[] = 'smtp_user';
+            if ($smtpFrom !== (string)($payload['smtp']['from'] ?? '')) $changedFields[] = 'smtp_from';
+            if ($smtpSecure !== (string)($payload['smtp']['secure'] ?? '')) $changedFields[] = 'smtp_secure';
+            if ($smtpPass !== '') $changedFields[] = 'smtp_pass';
+
             $payload['recipients_csv'] = $recipientsCsv;
             $payload['reminder_email'] = $reminderEmail;
             $payload['dms_subject'] = $dmsSubject;
@@ -2819,7 +2891,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ];
             $config['encrypted_payload'] = encrypt_payload($payload);
             write_config($config);
-            log_event('Recipients, messages and mail delivery settings updated via dashboard by admin');
+            $logParts = ['Recipients, messages and mail delivery settings updated via dashboard by admin.'];
+            if ($addedRecipients) $logParts[] = 'recipients_added=' . implode(',', $addedRecipients);
+            if ($removedRecipients) $logParts[] = 'recipients_removed=' . implode(',', $removedRecipients);
+            if ($reminderEmail !== $oldReminderEmail) $logParts[] = 'reminder_email_changed_from=' . $oldReminderEmail . '_to=' . $reminderEmail;
+            if ($changedFields) $logParts[] = 'fields_changed=' . implode(',', $changedFields);
+            $logParts[] = 'ip=' . $ip;
+            log_event(implode(' ', $logParts));
             $flash = '<div class="alert alert-ok">' . h(t('flash_payload_saved')) . '</div>';
         }
     }
@@ -2839,6 +2917,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($errors) {
             $flash = '<div class="alert alert-bad">' . implode('<br>', array_map('h', $errors)) . '</div>';
         } else {
+            $changedFields = [];
+            if ($smtpMode !== (string)($payload['smtp']['mode'] ?? '')) $changedFields[] = 'smtp_mode';
+            if ($smtpHost !== (string)($payload['smtp']['host'] ?? '')) $changedFields[] = 'smtp_host';
+            if ($smtpPort !== (int)($payload['smtp']['port'] ?? 0)) $changedFields[] = 'smtp_port';
+            if ($smtpUser !== (string)($payload['smtp']['user'] ?? '')) $changedFields[] = 'smtp_user';
+            if ($smtpFrom !== (string)($payload['smtp']['from'] ?? '')) $changedFields[] = 'smtp_from';
+            if ($smtpSecure !== (string)($payload['smtp']['secure'] ?? '')) $changedFields[] = 'smtp_secure';
+            if ($smtpPass !== '') $changedFields[] = 'smtp_pass';
+
             $payload['smtp'] = [
                 'mode' => $smtpMode,
                 'host' => $smtpHost,
@@ -2850,7 +2937,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ];
             $config['encrypted_payload'] = encrypt_payload($payload);
             write_config($config);
-            log_event('Mail delivery settings changed via dashboard by admin');
+            log_event('Mail delivery settings changed via dashboard by admin.' . ($changedFields ? ' fields_changed=' . implode(',', $changedFields) : '') . ' ip=' . $ip);
             $flash = '<div class="alert alert-ok">' . h(t('flash_mail_settings_saved')) . '</div>';
         }
     }
@@ -2896,7 +2983,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 require_data_dir_ready();
                 write_file_strict(LOG_FILE, '', 0);
                 safe_chmod(LOG_FILE, 0600);
-                log_event('Logs cleared via dashboard by admin');
+                log_event('Logs cleared via dashboard by admin. ip=' . $ip);
                 $flash = '<div class="alert alert-ok">' . h(t('flash_logs_cleared')) . '</div>';
             } catch (Throwable $e) {
                 $flash = '<div class="alert alert-bad">' . h(t('err_logs_clear_failed_template', ['{{error}}' => $e->getMessage()])) . '</div>';
@@ -2905,14 +2992,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     if ($action === 'reset_all') {
-        log_event('System reset via dashboard by admin');
-        safe_unlink(CONFIG_FILE);
-        safe_unlink(KEY_FILE);
-        safe_unlink(RATE_LIMIT_FILE);
-        safe_unlink(PIN_STATE_FILE);
-        invalidate_admin_session();
-        header('Location: ' . safe_self_path());
-        exit;
+        $currentPassword = (string)($_POST['current_admin_password'] ?? '');
+        if ($currentPassword === '' || !password_verify($currentPassword, (string)$config['password_hash'])) {
+            $flash = '<div class="alert alert-bad">' . h(t('err_current_password_wrong')) . '</div>';
+        } else {
+            log_event('System reset via dashboard by admin. ip=' . $ip);
+            safe_unlink(CONFIG_FILE);
+            safe_unlink(KEY_FILE);
+            safe_unlink(RATE_LIMIT_FILE);
+            safe_unlink(PIN_STATE_FILE);
+            invalidate_admin_session();
+            header('Location: ' . safe_self_path());
+            exit;
+        }
     }
 
     $config = read_config();
@@ -2949,6 +3041,13 @@ echo '</div>';
 echo '<div class="tab-panel active" data-tab-panel="tab-dashboard">';
 echo '<div class="section-grid">';
 echo '<div class="card"><h3>' . h(t('heading_system_status')) . '</h3><table>';
+echo '<tr><th>' . h(t('field_previous_login')) . '</th><td>';
+if (!empty($config['previous_login_at'])) {
+    echo h(t('previous_login_template', ['{{date}}' => date('d.m.Y H:i:s', (int)$config['previous_login_at']), '{{ip}}' => (string)($config['previous_login_ip'] ?? '?')]));
+} else {
+    echo h(t('previous_login_none'));
+}
+echo '</td></tr>';
 echo '<tr><th>' . h(t('field_last_checkin')) . '</th><td>' . h(date('d.m.Y H:i:s', (int)$config['last_checkin_at'])) . '</td></tr>';
 echo '<tr><th>' . h(t('field_next_due')) . '</th><td><span class="badge ' . ($remaining > 0 ? 'ok' : 'bad') . '">' . h(date('d.m.Y H:i:s', (int)$config['next_due_at'])) . '</span></td></tr>';
 echo '<tr><th>' . h(t('field_interval')) . '</th><td>' . h(format_interval((int)$config['interval_seconds'])) . '</td></tr>';
@@ -3056,9 +3155,12 @@ echo '<label>' . h(t('label_current_admin_password')) . '</label><input type="pa
 echo '<div class="grid"><div><label>' . h(t('label_new_admin_password')) . '</label><input type="password" name="new_admin_password" placeholder="' . h(t('placeholder_min_12_chars')) . '" autocomplete="new-password" data-bwignore="true"></div><div><label>' . h(t('label_new_admin_password_confirm')) . '</label><input type="password" name="new_admin_password_confirm" autocomplete="new-password" data-bwignore="true"></div></div>';
 echo '<div class="grid"><div><label>' . h(t('label_new_pin')) . '</label><input type="text" name="new_pin" pattern="\d{4}" maxlength="4" placeholder="1234" inputmode="numeric" autocomplete="off" data-bwignore="true"></div><div><label>' . h(t('label_new_pin_confirm')) . '</label><input type="text" name="new_pin_confirm" pattern="\d{4}" maxlength="4" placeholder="1234" inputmode="numeric" autocomplete="off" data-bwignore="true"></div></div>';
 echo '<div class="form-submit-gap"><button type="submit">' . h(t('btn_save_security')) . '</button></div></form></div>';
-echo '<div class="card danger-card"><h3>&#128736; ' . h(t('heading_system_actions')) . '</h3><div class="grid">';
-echo '<div><form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="reset_all"><button type="submit" class="btn btn-danger" onclick="return confirm(\'' . h(t('confirm_reset_system')) . '\')">' . h(t('btn_reset_system')) . '</button></form></div>';
-echo '</div></div>';
+echo '<div class="card danger-card"><h3>&#128736; ' . h(t('heading_system_actions')) . '</h3>';
+echo '<form method="post" autocomplete="off" data-bwignore="true">';
+echo '<input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="reset_all">';
+echo '<label>' . h(t('label_current_admin_password')) . '</label><input type="password" name="current_admin_password" autocomplete="off" data-bwignore="true" required>';
+echo '<div class="form-submit-gap"><button type="submit" class="btn btn-danger" onclick="return confirm(\'' . h(t('confirm_reset_system')) . '\')">' . h(t('btn_reset_system')) . '</button></div></form>';
+echo '</div>';
 echo '</div>';
 echo '<div class="tab-panel" data-tab-panel="tab-logs">';
 echo '<div class="card"><h3>' . h(t('heading_logs')) . '</h3>';
