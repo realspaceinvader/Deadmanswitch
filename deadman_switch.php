@@ -3042,8 +3042,9 @@ render_header('Dashboard', normalize_theme((string)($config['theme'] ?? 'light')
 echo '<div class="page-shell">';
 echo '<div class="card hero">';
 echo '<div class="top"><div><h1>' . theme_mascot((string)($config['theme'] ?? 'light'), 'html') . ' ' . h(APP_NAME) . ' ' . h(t('nav_dashboard')) . '</h1></div><a class="btn btn-logout" href="?logout=1">' . h(t('btn_logout')) . '</a></div>';
+
 echo '<div class="top"><div><h3>Version ' . h(APP_VERSION) . ' by Spaceinvader.at</h3></div></div>';
-render_buymeacoffee('bmc-wrap-inline');
+
 echo '</div>';
 if ($flash !== '') echo $flash;
 
@@ -3203,5 +3204,5 @@ echo '<div class="form-submit-gap"><button type="submit" class="btn btn-danger" 
 echo '</div>';
 echo '</div>';
 echo '</div></div>';
-
+render_buymeacoffee('bmc-wrap-inline');
 render_footer();
