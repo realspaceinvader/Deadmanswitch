@@ -784,7 +784,7 @@ function apply_security_headers(bool $forImage = false): void
         header("Content-Security-Policy: default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
         return;
     }
-    header("Content-Security-Policy: default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
+    header("Content-Security-Policy: default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https://img.buymeacoffee.com; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
 }
 
 function safe_self_path(): string
@@ -2194,8 +2194,23 @@ function render_header(string $title, string $theme = 'light'): void
         @media(max-width:920px){.stats-grid{grid-template-columns:1fr}}
         @media(max-width:520px){.auth-row{grid-template-columns:1fr}.captcha-box img{height:auto}}
         pre{font:inherit}
+        .bmc-wrap{text-align:center;margin-top:22px}
+        .bmc-wrap a{display:inline-block;line-height:0;border-radius:10px;box-shadow:0 10px 22px rgba(60,166,216,.16);transition:transform .15s ease,box-shadow .15s ease}
+        .bmc-wrap a:hover{transform:translateY(-2px);box-shadow:0 14px 28px rgba(60,166,216,.24)}
+        .bmc-wrap img{display:block;width:auto;max-width:100%;height:44px;border-radius:10px}
+        .bmc-wrap-inline{text-align:center;margin:6px 0 0}
+        .bmc-wrap-inline img{height:38px}
     </style>';
     echo '</head><body class="theme-' . h($theme) . '"><div class="wrap">';
+}
+
+function render_buymeacoffee(string $wrapperClass = 'bmc-wrap'): void
+{
+    $imgUrl = 'https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=spaceinvader&button_colour=64c4e0&font_colour=000000&font_family=Lato&outline_colour=000000&coffee_colour=FFDD00';
+    echo '<div class="' . h($wrapperClass) . '">'
+        . '<a href="https://www.buymeacoffee.com/spaceinvader" target="_blank" rel="noopener noreferrer">'
+        . '<img src="' . h($imgUrl) . '" alt="Buy me a coffee" loading="lazy" referrerpolicy="no-referrer">'
+        . '</a></div>';
 }
 
 function render_footer(): void
@@ -2512,6 +2527,7 @@ if (!$isCli && route_suffix() === '/checkin') {
             echo '<button class="pin-button" type="submit">' . h(t('btn_confirm')) . '</button>';
             echo '</form>';
         }
+        render_buymeacoffee('bmc-wrap-inline');
     }
     echo '</div></div>';
     render_footer();
@@ -2708,7 +2724,9 @@ if (!is_admin_authenticated()) {
     echo '<div class="auth-field"><input id="admin-login-password" type="password" name="password" autocomplete="current-password" required></div>';
     echo '<div style="margin-top:16px">' . render_captcha_html('admin_login', 'Captcha', false, 'captcha-compact') . '</div>';
     echo '<div style="margin-top:16px"><button type="submit">' . h(t('btn_login')) . '</button></div>';
-    echo '</form></div></div>';
+    echo '</form>';
+    render_buymeacoffee();
+    echo '</div></div>';
     render_footer();
     exit;
 }
@@ -3025,6 +3043,7 @@ echo '<div class="page-shell">';
 echo '<div class="card hero">';
 echo '<div class="top"><div><h1>' . theme_mascot((string)($config['theme'] ?? 'light'), 'html') . ' ' . h(APP_NAME) . ' ' . h(t('nav_dashboard')) . '</h1></div><a class="btn btn-logout" href="?logout=1">' . h(t('btn_logout')) . '</a></div>';
 echo '<div class="top"><div><h3>Version ' . h(APP_VERSION) . ' by Spaceinvader.at</h3></div></div>';
+render_buymeacoffee('bmc-wrap-inline');
 echo '</div>';
 if ($flash !== '') echo $flash;
 
